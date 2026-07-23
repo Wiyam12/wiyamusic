@@ -2,24 +2,20 @@ import 'dart:io';
 
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-/// Clients used when resolving stream manifests.
-///
-/// On Android we only use [YoutubeApiClient.androidSdkless] so googlevideo CDN
-/// URLs match [youtubeStreamHeaders]. Mixing clients (VR/iOS) often yields URLs
-/// that 403 when played with a different User-Agent.
+/// Clients tried one-at-a-time when resolving stream manifests.
 List<YoutubeApiClient> get customClients {
   if (Platform.isIOS || Platform.isMacOS) {
     return [
       YoutubeApiClient.ios,
       YoutubeApiClient.androidSdkless,
+      customAndroidVr,
     ];
   }
 
-  return const [YoutubeApiClient.androidSdkless];
+  return [customAndroidVr, YoutubeApiClient.androidSdkless];
 }
 
-/// ANDROID_VR client aligned with current yt-dlp definitions.
-/// Kept for optional restricted-video experiments; not used in [customClients].
+/// ANDROID_VR client with an explicit User-Agent (required by googlevideo CDN).
 const customAndroidVr = YoutubeApiClient(
   {
     'context': {
@@ -46,18 +42,28 @@ const customAndroidVr = YoutubeApiClient(
   },
 );
 
-/// User-Agent that must match the client used to mint the stream URL.
-String get youtubeStreamUserAgent {
-  if (Platform.isIOS || Platform.isMacOS) {
+String clientStreamUserAgent(YoutubeApiClient client) {
+  final fromPayload =
+      client.payload['context']?['client']?['userAgent'] as String?;
+  if (fromPayload != null && fromPayload.isNotEmpty) return fromPayload;
+
+  final fromHeaders = client.headers['User-Agent'] as String?;
+  if (fromHeaders != null && fromHeaders.isNotEmpty) return fromHeaders;
+
+  if (client.payload['context']?['client']?['clientName'] == 'IOS') {
     return 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)';
   }
+
   return 'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip';
 }
 
-/// Headers required by googlevideo CDN when opening progressive streams.
-Map<String, String> get youtubeStreamHeaders => {
-  'User-Agent': youtubeStreamUserAgent,
+Map<String, String> streamHeadersForClient(YoutubeApiClient client) => {
+  'User-Agent': clientStreamUserAgent(client),
   'Accept': '*/*',
   'Referer': 'https://www.youtube.com/',
   'Origin': 'https://www.youtube.com',
 };
+
+/// Default headers for the platform's preferred client.
+Map<String, String> get youtubeStreamHeaders =>
+    streamHeadersForClient(customClients.first);

@@ -35,7 +35,6 @@ import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/listening_stats_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
-import 'package:wiyamusic/utilities/app_utils.dart';
 import 'package:wiyamusic/utilities/map_utils.dart';
 import 'package:wiyamusic/utilities/mediaitem.dart';
 import 'package:wiyamusic/utilities/queue_entry_utils.dart';
@@ -44,7 +43,10 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   WiyaMusicAudioHandler() {
     if (Platform.isAndroid) {
       _androidEqualizer = AndroidEqualizer();
+      // Send YouTube CDN headers directly via ExoPlayer. The default local
+      // HTTP proxy often causes googlevideo 403s after cleartext is allowed.
       audioPlayer = AudioPlayer(
+        useProxyForRequestHeaders: false,
         audioPipeline: AudioPipeline(androidAudioEffects: [_androidEqualizer!]),
         audioLoadConfiguration: const AudioLoadConfiguration(
           androidLoadControl: AndroidLoadControl(
@@ -459,9 +461,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     final initialized = await _ensureEqualizerConfigured();
     if (!initialized) return null;
     try {
-      return await equalizer.parameters.timeout(
-        const Duration(seconds: 2),
-      );
+      return await equalizer.parameters.timeout(const Duration(seconds: 2));
     } catch (e, stackTrace) {
       logger.log(
         'Failed to get equalizer parameters',
@@ -703,10 +703,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }
 
   void _handlePlaybackError({bool notifyUser = true}) {
-    logger.log(
-      'Playback request failed',
-      error: _lastError,
-    );
+    logger.log('Playback request failed', error: _lastError);
 
     if (notifyUser && !_playbackFailureController.isClosed) {
       _playbackFailureController.add(null);
@@ -1852,9 +1849,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     // request is already resolving a stream.
     final ownsRequestLock = transitionId == null;
     if (ownsRequestLock && isPlayRequestPending.value) {
-      logger.log(
-        'Ignoring playSong; a playback request is already pending',
-      );
+      logger.log('Ignoring playSong; a playback request is already pending');
       return false;
     }
 
@@ -1915,6 +1910,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         songData,
         playback.songUrl,
         playback.isOffline,
+        headers: playback.headers,
       );
 
       // Check again after building the audio source (SponsorBlock fetch can also be slow).
@@ -1973,15 +1969,16 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     final isOffline = await _resolveOfflineAndSetPaths(songData);
     final songUrl = await _getPlaybackUrl(songData, isOffline);
 
-    if (songUrl == null || songUrl.isEmpty) {
-      if (!isOffline) {
-        logger.log('Failed to get song URL for ${songData['ytid']}');
-        return null;
-      }
+    if (songUrl != null && songUrl.url.isNotEmpty) {
+      return _PlaybackSource(
+        songUrl: songUrl.url,
+        isOffline: isOffline,
+        headers: songUrl.headers,
+      );
+    }
 
+    if (isOffline) {
       // If offline mode is enabled, do NOT fall back to online streams.
-      // This prevents network requests while the user explicitly requested
-      // offline-only operation.
       try {
         if (offlineMode.value) {
           logger.log(
@@ -1997,28 +1994,35 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         'Offline file missing for ${songData['ytid']}, switching to online',
       );
 
-      final onlineUrl = await fetchSongStreamUrl(
+      final online = await resolveSongStream(
         songData['ytid'],
         songData['isLive'] ?? false,
       );
 
-      if (onlineUrl == null || onlineUrl.isEmpty) {
+      if (online == null || online.url.isEmpty) {
         logger.log('Failed to get song URL for ${songData['ytid']}');
         return null;
       }
 
-      return _PlaybackSource(songUrl: onlineUrl, isOffline: false);
+      return _PlaybackSource(
+        songUrl: online.url,
+        isOffline: false,
+        headers: online.headers,
+      );
     }
 
-    return _PlaybackSource(songUrl: songUrl, isOffline: isOffline);
+    logger.log('Failed to get song URL for ${songData['ytid']}');
+    return null;
   }
 
-  Future<String?> _getPlaybackUrl(Map song, bool isOffline) async {
+  Future<ResolvedSongStream?> _getPlaybackUrl(Map song, bool isOffline) async {
     if (isOffline) {
-      return _getOfflineSongUrl(song);
+      final path = await _getOfflineSongUrl(song);
+      if (path == null || path.isEmpty) return null;
+      return ResolvedSongStream(url: path, headers: const {});
     }
 
-    return fetchSongStreamUrl(song['ytid'], song['isLive'] ?? false);
+    return resolveSongStream(song['ytid'], song['isLive'] ?? false);
   }
 
   Future<String?> _getOfflineSongUrl(Map song) async {
@@ -2092,24 +2096,27 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       // Finish the old session and start the new one as one atomic pair, only
       // after every abort path above is cleared. Finishing before the staleness
       // re-check let a stale transition kill a newer transition's session.
-      // Do this before awaiting play() so Wrapped starts counting from the
-      // first moments of the new track, not after the async handoff.
       listeningStatsService
         ..finishListeningSession(
           countCurrentTick: true,
           wasPlaying: wasPlayingBeforeSwap,
         )
         ..startListeningSession(song, duration: audioPlayer.duration);
-      await audioPlayer.play().catchError((Object e, StackTrace stackTrace) {
-        logger.log('Error starting playback', error: e, stackTrace: stackTrace);
-        _lastError = e.toString();
-      });
-      unawaited(updateRecentlyPlayed(song['ytid'], songFallback: song));
 
-      if (!isOffline) {
-        final cacheKey = songStreamCacheKey(song['ytid'].toString());
-        unawaited(addOrUpdateData<String>('cache', cacheKey, songUrl));
-      }
+      // Do NOT await play(): its future only completes when playback pauses/
+      // stops/finishes. Awaiting it would leave isPlayRequestPending stuck true
+      // for the whole song (spinner never clears).
+      unawaited(
+        audioPlayer.play().catchError((Object e, StackTrace stackTrace) {
+          logger.log(
+            'Error starting playback',
+            error: e,
+            stackTrace: stackTrace,
+          );
+          _lastError = e.toString();
+        }),
+      );
+      unawaited(updateRecentlyPlayed(song['ytid'], songFallback: song));
 
       _updatePlaybackState();
 
@@ -2148,26 +2155,27 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
           !_isStaleTransition(transitionId)) {
         final songId = song['ytid']?.toString();
         if (songId != null && songId.isNotEmpty) {
-          final refreshedUrl = await fetchSongStreamUrl(
+          final refreshed = await resolveSongStream(
             songId,
             song['isLive'] ?? false,
             bypassCache: true,
           );
 
-          if (refreshedUrl != null &&
-              refreshedUrl.isNotEmpty &&
-              refreshedUrl != songUrl) {
+          if (refreshed != null &&
+              refreshed.url.isNotEmpty &&
+              refreshed.url != songUrl) {
             final refreshedSource = await buildAudioSource(
               song,
-              refreshedUrl,
+              refreshed.url,
               false,
+              headers: refreshed.headers,
             );
 
             if (refreshedSource != null) {
               return _setAudioSourceAndPlay(
                 song,
                 refreshedSource,
-                refreshedUrl,
+                refreshed.url,
                 false,
                 mediaId: mediaId,
                 transitionId: transitionId,
@@ -2191,17 +2199,22 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     // Do not attempt any network calls when offline mode is enabled.
     if (offlineMode.value) return false;
 
-    final onlineUrl = await fetchSongStreamUrl(
+    final online = await resolveSongStream(
       song['ytid'],
       song['isLive'] ?? false,
     );
-    if (onlineUrl != null && onlineUrl.isNotEmpty) {
-      final onlineSource = await buildAudioSource(song, onlineUrl, false);
+    if (online != null && online.url.isNotEmpty) {
+      final onlineSource = await buildAudioSource(
+        song,
+        online.url,
+        false,
+        headers: online.headers,
+      );
       if (onlineSource != null) {
         return _setAudioSourceAndPlay(
           song,
           onlineSource,
-          onlineUrl,
+          online.url,
           false,
           mediaId: mediaId,
           transitionId: transitionId,
@@ -2303,14 +2316,17 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         wasPlaying: wasPlayingBeforeSwap,
       );
 
-      await audioPlayer.play().catchError((Object e, StackTrace stackTrace) {
-        logger.log(
-          'Error starting radio playback',
-          error: e,
-          stackTrace: stackTrace,
-        );
-        _lastError = e.toString();
-      });
+      // Same as song playback: do not await play() or the request lock sticks.
+      unawaited(
+        audioPlayer.play().catchError((Object e, StackTrace stackTrace) {
+          logger.log(
+            'Error starting radio playback',
+            error: e,
+            stackTrace: stackTrace,
+          );
+          _lastError = e.toString();
+        }),
+      );
 
       _updatePlaybackState();
       return true;
@@ -2332,8 +2348,9 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   Future<AudioSource?> buildAudioSource(
     Map song,
     String songUrl,
-    bool isOffline,
-  ) async {
+    bool isOffline, {
+    Map<String, String>? headers,
+  }) async {
     try {
       final tag = mapToMediaItem(song);
 
@@ -2344,7 +2361,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       final uri = Uri.parse(songUrl);
       final audioSource = AudioSource.uri(
         uri,
-        headers: youtubeStreamHeaders,
+        headers: headers ?? youtubeStreamHeaders,
         tag: tag,
       );
 
@@ -2718,8 +2735,13 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 }
 
 class _PlaybackSource {
-  const _PlaybackSource({required this.songUrl, required this.isOffline});
+  const _PlaybackSource({
+    required this.songUrl,
+    required this.isOffline,
+    this.headers,
+  });
 
   final String songUrl;
   final bool isOffline;
+  final Map<String, String>? headers;
 }

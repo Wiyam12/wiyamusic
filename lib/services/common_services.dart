@@ -80,31 +80,131 @@ void reloadSongLibraryStateFromStorage() {
 const Duration _manifestTimeout = Duration(seconds: 30);
 const Duration _cacheValidationDuration = Duration(hours: 1);
 
-/// Fetches a stream manifest for a song, honoring proxy settings.
-Future<StreamManifest?> _fetchStreamManifest(String songId) async {
+/// Fetches a stream manifest for a song from a single client.
+Future<StreamManifest?> _fetchStreamManifestForClient(
+  String songId,
+  YoutubeApiClient client,
+) async {
   if (useProxy.value) {
-    return ProxyManager().getSongManifest(songId).timeout(_manifestTimeout);
+    // ProxyManager currently merges [customClients]; use direct client here
+    // for UA matching. Proxy path still works via getSongManifest fallback.
+    return ProxyManager()
+        .getSongManifest(songId)
+        .timeout(_manifestTimeout);
   }
 
   return ytClient.videos.streams
-      .getManifest(songId, ytClients: customClients)
+      .getManifest(songId, ytClients: [client])
       .timeout(_manifestTimeout);
 }
 
+/// Fetches a stream manifest trying [customClients] in order.
+Future<StreamManifest?> _fetchStreamManifest(String songId) async {
+  Object? lastError;
+  for (final client in customClients) {
+    try {
+      final manifest = await _fetchStreamManifestForClient(songId, client);
+      if (manifest != null) return manifest;
+    } catch (e) {
+      lastError = e;
+      logger.log(
+        'Manifest fetch failed for $songId '
+        '(${client.payload['context']?['client']?['clientName']})',
+        error: e,
+      );
+    }
+  }
+  if (lastError != null) {
+    logger.log('All manifest clients failed for $songId', error: lastError);
+  }
+  return null;
+}
+
+/// Playable stream URL plus CDN headers that match the minting client.
+class ResolvedSongStream {
+  const ResolvedSongStream({
+    required this.url,
+    required this.headers,
+  });
+
+  final String url;
+  final Map<String, String> headers;
+}
+
+/// Tries each YouTube client until a playable URL validates with matching headers.
+Future<ResolvedSongStream?> _resolveFreshSongStream(String songId) async {
+  if (useProxy.value) {
+    try {
+      final manifest = await ProxyManager()
+          .getSongManifest(songId)
+          .timeout(_manifestTimeout);
+      if (manifest != null) {
+        final url = selectPlayableStreamUrl(manifest);
+        if (url != null && url.isNotEmpty) {
+          final headers = youtubeStreamHeaders;
+          if (await _validateStreamUrl(url, headers)) {
+            return ResolvedSongStream(url: url, headers: headers);
+          }
+        }
+      }
+    } catch (e) {
+      logger.log('Proxy manifest fetch failed for $songId', error: e);
+    }
+  }
+
+  for (final client in customClients) {
+    try {
+      final manifest = await ytClient.videos.streams
+          .getManifest(songId, ytClients: [client])
+          .timeout(_manifestTimeout);
+      final url = selectPlayableStreamUrl(manifest);
+      if (url == null || url.isEmpty) continue;
+
+      final headers = streamHeadersForClient(client);
+      if (await _validateStreamUrl(url, headers)) {
+        return ResolvedSongStream(url: url, headers: headers);
+      }
+
+      logger.log(
+        'Stream URL from '
+        '${client.payload['context']?['client']?['clientName']} '
+        'failed CDN check for $songId',
+      );
+    } catch (e) {
+      logger.log(
+        'Stream resolve failed for $songId '
+        '(${client.payload['context']?['client']?['clientName']})',
+        error: e,
+      );
+    }
+  }
+  return null;
+}
+
 /// Returns a cached song URL if present and still valid.
-Future<String?> _getCachedSongUrl(
+Future<ResolvedSongStream?> _getCachedSongStream(
   String cacheKey,
   Duration cacheDuration,
 ) async {
-  final cachedUrl = await getData(
+  final cached = await getData(
     'cache',
     cacheKey,
     cachingDuration: cacheDuration,
   );
 
-  if (cachedUrl is! String || cachedUrl.isEmpty) {
+  if (cached is! Map) return null;
+  final url = cached['url']?.toString();
+  final userAgent = cached['userAgent']?.toString();
+  if (url == null || url.isEmpty || userAgent == null || userAgent.isEmpty) {
     return null;
   }
+
+  final headers = <String, String>{
+    'User-Agent': userAgent,
+    'Accept': '*/*',
+    'Referer': 'https://www.youtube.com/',
+    'Origin': 'https://www.youtube.com',
+  };
 
   final cacheBox = await Hive.openBox('cache');
   final cacheDate = cacheBox.get('${cacheKey}_date') as DateTime?;
@@ -113,11 +213,11 @@ Future<String?> _getCachedSongUrl(
       cacheDate != null && now.difference(cacheDate) > _cacheValidationDuration;
 
   if (!isOld) {
-    return cachedUrl;
+    return ResolvedSongStream(url: url, headers: headers);
   }
 
-  if (await _validateCachedUrl(cachedUrl)) {
-    return cachedUrl;
+  if (await _validateStreamUrl(url, headers)) {
+    return ResolvedSongStream(url: url, headers: headers);
   }
 
   await deleteData('cache', cacheKey);
@@ -125,14 +225,40 @@ Future<String?> _getCachedSongUrl(
   return null;
 }
 
-/// Checks if a cached URL still responds successfully.
-Future<bool> _validateCachedUrl(String cachedUrl) async {
+Future<void> _cacheSongStream(
+  String cacheKey,
+  ResolvedSongStream stream,
+) async {
+  unawaited(
+    addOrUpdateData<Map>('cache', cacheKey, {
+      'url': stream.url,
+      'userAgent': stream.headers['User-Agent'],
+    }),
+  );
+}
+
+/// Checks if a stream URL still responds successfully with the given headers.
+Future<bool> _validateStreamUrl(
+  String streamUrl,
+  Map<String, String> headers,
+) async {
   try {
     final response = await http.head(
-      Uri.parse(cachedUrl),
-      headers: youtubeStreamHeaders,
+      Uri.parse(streamUrl),
+      headers: headers,
     );
-    return response.statusCode >= 200 && response.statusCode < 300;
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return true;
+    }
+    // Some googlevideo endpoints reject HEAD but allow ranged GET.
+    if (response.statusCode == 403 || response.statusCode == 405) {
+      final ranged = await http.get(
+        Uri.parse(streamUrl),
+        headers: {...headers, 'Range': 'bytes=0-1023'},
+      );
+      return ranged.statusCode == 200 || ranged.statusCode == 206;
+    }
+    return false;
   } catch (_) {
     return false;
   }
@@ -607,53 +733,59 @@ Future<String?> fetchSongStreamUrl(
   bool isLive, {
   bool bypassCache = false,
 }) async {
+  final resolved = await resolveSongStream(
+    songId,
+    isLive,
+    bypassCache: bypassCache,
+  );
+  return resolved?.url;
+}
+
+/// Resolves a playable stream URL + matching CDN headers (cached when possible).
+Future<ResolvedSongStream?> resolveSongStream(
+  String songId,
+  bool isLive, {
+  bool bypassCache = false,
+}) async {
   try {
     if (songId.isEmpty) {
-      logger.log('fetchSongStreamUrl: songId is empty');
+      logger.log('resolveSongStream: songId is empty');
       return null;
     }
     if (isLive) {
       final streamInfo = await ytClient.videos.streamsClient
           .getHttpLiveStreamUrl(VideoId(songId));
-      return streamInfo;
+      return ResolvedSongStream(
+        url: streamInfo,
+        headers: youtubeStreamHeaders,
+      );
     }
 
     const _cacheDuration = Duration(hours: 3);
     final cacheKey = songStreamCacheKey(songId);
 
     if (!bypassCache) {
-      // Try to get from cache
-      final cachedUrl = await _getCachedSongUrl(cacheKey, _cacheDuration);
-      if (cachedUrl != null) {
-        return cachedUrl;
-      }
+      final cached = await _getCachedSongStream(cacheKey, _cacheDuration);
+      if (cached != null) return cached;
     } else {
       await deleteData('cache', cacheKey);
       await deleteData('cache', '${cacheKey}_date');
     }
 
-    // Get fresh URL
-    final manifest = await _fetchStreamManifest(songId);
-    if (manifest == null) {
-      logger.log('fetchSongStreamUrl: no manifest for $songId');
+    final resolved = await _resolveFreshSongStream(songId);
+    if (resolved == null) {
+      logger.log('resolveSongStream: no playable streams for $songId');
       return null;
     }
 
-    final url = selectPlayableStreamUrl(manifest);
-    if (url == null || url.isEmpty) {
-      logger.log('fetchSongStreamUrl: no playable streams for $songId');
-      return null;
-    }
-
-    unawaited(addOrUpdateData<String>('cache', cacheKey, url));
-
-    return url;
+    unawaited(_cacheSongStream(cacheKey, resolved));
+    return resolved;
   } on TimeoutException catch (_) {
-    logger.log('fetchSongStreamUrl request timed out for $songId');
+    logger.log('resolveSongStream request timed out for $songId');
     return null;
   } catch (e, stackTrace) {
     logger.log(
-      'Error in fetchSongStreamUrl for $songId:',
+      'Error in resolveSongStream for $songId:',
       error: e,
       stackTrace: stackTrace,
     );

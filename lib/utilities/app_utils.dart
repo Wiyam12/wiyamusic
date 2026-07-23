@@ -183,8 +183,8 @@ String songStreamCacheKey(String songId) {
       : Platform.isMacOS
       ? 'macos'
       : 'android';
-  // v2: androidSdkless-only URLs + matching CDN headers
-  return 'song_${songId}_${audioQualitySetting.value}_${platformKey}_v2_url';
+  // v3: per-client UA stored with URL; ANDROID_VR preferred on Android
+  return 'song_${songId}_${audioQualitySetting.value}_${platformKey}_v3_url';
 }
 
 List<AudioOnlyStreamInfo> _filterCompatibleAudioOnlySources(
