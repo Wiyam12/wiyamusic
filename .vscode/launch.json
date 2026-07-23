@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "WiyaMusic",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": ["--flavor", "github"]
+    },
+    {
+      "name": "WiyaMusic (profile)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "profile",
+      "args": ["--flavor", "github"]
+    },
+    {
+      "name": "WiyaMusic (release)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "release",
+      "args": ["--flavor", "github"]
+    },
+    {
+      "name": "WiyaMusic (fdroid)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main_fdroid.dart",
+      "args": ["--flavor", "fdroid"]
+    }
+  ]
+}

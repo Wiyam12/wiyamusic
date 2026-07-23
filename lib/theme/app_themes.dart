@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,21 +15,25 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
+
+import 'dart:io';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:musify/services/settings_manager.dart';
-import 'package:musify/theme/dynamic_color_compat.dart';
+import 'package:wiyamusic/constants/app_constants.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/theme/dynamic_color_compat.dart';
 
 ThemeMode themeMode = getThemeMode(themeModeSetting);
 Brightness brightness = getBrightnessFromThemeMode(themeMode);
 
-PageTransitionsBuilder transitionsBuilder = predictiveBack.value
+PageTransitionsBuilder transitionsBuilder =
+    Platform.isAndroid && predictiveBack.value
     ? const PredictiveBackPageTransitionsBuilder()
     : const CupertinoPageTransitionsBuilder();
 
@@ -183,9 +187,9 @@ ThemeData getAppTheme(ColorScheme colorScheme) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
     ),
     navigationBarTheme: base.navigationBarTheme.copyWith(
-      backgroundColor: bgColor,
+      backgroundColor: Colors.transparent,
       elevation: 0,
-      height: 70,
+      height: floatingNavBarHeight,
       indicatorColor: effectiveColorScheme.primaryContainer,
       iconTheme: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {

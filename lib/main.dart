@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,11 +15,12 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:app_links/app_links.dart';
 import 'package:audio_service/audio_service.dart';
@@ -30,27 +31,27 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:musify/extensions/l10n.dart';
-import 'package:musify/localization/app_localizations.dart';
-import 'package:musify/services/audio_service.dart';
-import 'package:musify/services/data_manager.dart';
-import 'package:musify/services/io_service.dart';
-import 'package:musify/services/listening_stats_service.dart';
-import 'package:musify/services/logger_service.dart';
-import 'package:musify/services/playlist_sharing.dart';
-import 'package:musify/services/playlists_manager.dart';
-import 'package:musify/services/router_service.dart';
-import 'package:musify/services/settings_manager.dart';
-import 'package:musify/services/update_manager.dart';
-import 'package:musify/theme/app_themes.dart';
-import 'package:musify/utilities/flutter_toast.dart';
-import 'package:musify/utilities/language_utils.dart';
-import 'package:musify/utilities/playlist_utils.dart';
-import 'package:musify/utilities/sharing_intent.dart';
+import 'package:wiyamusic/extensions/l10n.dart';
+import 'package:wiyamusic/localization/app_localizations.dart';
+import 'package:wiyamusic/services/audio_service.dart';
+import 'package:wiyamusic/services/data_manager.dart';
+import 'package:wiyamusic/services/io_service.dart';
+import 'package:wiyamusic/services/listening_stats_service.dart';
+import 'package:wiyamusic/services/logger_service.dart';
+import 'package:wiyamusic/services/playlist_sharing.dart';
+import 'package:wiyamusic/services/playlists_manager.dart';
+import 'package:wiyamusic/services/router_service.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/services/update_manager.dart';
+import 'package:wiyamusic/theme/app_themes.dart';
+import 'package:wiyamusic/utilities/flutter_toast.dart';
+import 'package:wiyamusic/utilities/language_utils.dart';
+import 'package:wiyamusic/utilities/playlist_utils.dart';
+import 'package:wiyamusic/utilities/sharing_intent.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
-late MusifyAudioHandler audioHandler;
+late WiyaMusicAudioHandler audioHandler;
 late StreamSubscription<String?> sharingIntentSubscription;
 
 final logger = Logger();
@@ -59,8 +60,8 @@ final appLinks = AppLinks();
 bool isFdroidBuild = false;
 bool isUpdateChecked = false;
 
-class Musify extends StatefulWidget {
-  const Musify({super.key});
+class WiyaMusic extends StatefulWidget {
+  const WiyaMusic({super.key});
 
   static Future<void> updateAppState(
     BuildContext context, {
@@ -69,7 +70,7 @@ class Musify extends StatefulWidget {
     Color? newAccentColor,
     bool? useSystemColor,
   }) async {
-    context.findAncestorStateOfType<_MusifyState>()!.changeSettings(
+    context.findAncestorStateOfType<_WiyaMusicState>()!.changeSettings(
       newThemeMode: newThemeMode,
       newLocale: newLocale,
       newAccentColor: newAccentColor,
@@ -78,10 +79,10 @@ class Musify extends StatefulWidget {
   }
 
   @override
-  _MusifyState createState() => _MusifyState();
+  _WiyaMusicState createState() => _WiyaMusicState();
 }
 
-class _MusifyState extends State<Musify> with WidgetsBindingObserver {
+class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
   void changeSettings({
     ThemeMode? newThemeMode,
     Locale? newLocale,
@@ -166,7 +167,7 @@ class _MusifyState extends State<Musify> with WidgetsBindingObserver {
       );
     }
 
-    if (!isFdroidBuild) {
+    if (!isFdroidBuild && Platform.isAndroid) {
       if (shouldWeCheckUpdates.value == true) {
         if (!isUpdateChecked && kReleaseMode) {
           SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -190,6 +191,10 @@ class _MusifyState extends State<Musify> with WidgetsBindingObserver {
           });
         }
       }
+    } else if (!offlineMode.value) {
+      SchedulerBinding.instance.addPostFrameCallback((_) async {
+        await fetchAnnouncementOnly();
+      });
     }
   }
 
@@ -259,6 +264,7 @@ class _MusifyState extends State<Musify> with WidgetsBindingObserver {
               GlobalWidgetsLocalizations.delegate,
               GlobalCupertinoLocalizations.delegate,
             ],
+            debugShowCheckedModeBanner: false,
             supportedLocales: appSupportedLocales,
             locale: languageSetting,
             routerConfig: NavigationManager.router,
@@ -273,7 +279,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initialisation();
 
-  runApp(const Musify());
+  runApp(const WiyaMusic());
 }
 
 Future<void> initialisation() async {
@@ -288,10 +294,10 @@ Future<void> initialisation() async {
     ]);
 
     audioHandler = await AudioService.init(
-      builder: MusifyAudioHandler.new,
+      builder: WiyaMusicAudioHandler.new,
       config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.gokadzev.musify',
-        androidNotificationChannelName: 'Musify',
+        androidNotificationChannelId: 'com.wiyamusic.app',
+        androidNotificationChannelName: 'WiyaMusic',
         androidNotificationIcon: 'drawable/ic_launcher_foreground',
         androidShowNotificationBadge: true,
         androidStopForegroundOnPause: false,
@@ -328,7 +334,8 @@ Future<void> initialisation() async {
 }
 
 void handleIncomingLink(Uri? uri) async {
-  if (uri == null || uri.scheme != 'musify' || uri.host != 'playlist') return;
+  if (uri == null || uri.scheme != 'wiyamusic' || uri.host != 'playlist')
+    return;
 
   if (uri.pathSegments.length < 2 || uri.pathSegments[0] != 'custom') return;
 

@@ -1,0 +1,7 @@
+PLAYLISTS AND ALBUMS CHECKING RESULT:
+      
+> The playlist with the ID PLgzTt0k8mXzHcKebL8d0uYHfawiARhQja does not have an image URL.
+> The playlist with the ID PLXpMeQYR1ilIgQ0klpqWf7-RdfouCeJLj does not have an image URL.
+> The playlist with the ID PLXpMeQYR1ilKXzjYmIb-FIKmYnzWZ7v4b does not have an image URL.
+      
+The checking process is done

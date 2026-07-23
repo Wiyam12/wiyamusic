@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,30 +15,30 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:musify/constants/version.dart';
-import 'package:musify/screens/about_page.dart';
-import 'package:musify/screens/artist_page.dart';
-import 'package:musify/screens/bottom_navigation_page.dart';
-import 'package:musify/screens/equalizer_page.dart';
-import 'package:musify/screens/home_page.dart';
-import 'package:musify/screens/library_page.dart';
-import 'package:musify/screens/playlist_folder_page.dart';
-import 'package:musify/screens/playlist_page.dart';
-import 'package:musify/screens/radio_stations_page.dart';
-import 'package:musify/screens/search_page.dart';
-import 'package:musify/screens/settings_page.dart';
-import 'package:musify/screens/time_machine_page.dart';
-import 'package:musify/screens/user_songs_page.dart';
-import 'package:musify/services/playlist_download_service.dart';
-import 'package:musify/services/settings_manager.dart';
-import 'package:musify/widgets/offline_search_placeholder.dart';
+import 'package:wiyamusic/constants/version.dart';
+import 'package:wiyamusic/screens/about_page.dart';
+import 'package:wiyamusic/screens/artist_page.dart';
+import 'package:wiyamusic/screens/bottom_navigation_page.dart';
+import 'package:wiyamusic/screens/equalizer_page.dart';
+import 'package:wiyamusic/screens/home_page.dart';
+import 'package:wiyamusic/screens/library_page.dart';
+import 'package:wiyamusic/screens/playlist_folder_page.dart';
+import 'package:wiyamusic/screens/playlist_page.dart';
+import 'package:wiyamusic/screens/radio_stations_page.dart';
+import 'package:wiyamusic/screens/search_page.dart';
+import 'package:wiyamusic/screens/settings_page.dart';
+import 'package:wiyamusic/screens/time_machine_page.dart';
+import 'package:wiyamusic/screens/user_songs_page.dart';
+import 'package:wiyamusic/services/playlist_download_service.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/widgets/offline_search_placeholder.dart';
 
 class NavigationManager {
   factory NavigationManager() {
@@ -297,7 +297,7 @@ class NavigationManager {
                 path: 'license',
                 pageBuilder: (context, state) => _pushPage(
                   child: const LicensePage(
-                    applicationName: 'Musify',
+                    applicationName: 'WiyaMusic',
                     applicationVersion: appVersion,
                   ),
                   state: state,

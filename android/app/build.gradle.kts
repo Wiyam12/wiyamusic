@@ -23,7 +23,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.gokadzev.musify"
+    namespace = "com.wiyamusic.app"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
 
@@ -42,7 +42,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.gokadzev.musify"
+        applicationId = "com.wiyamusic.app"
         minSdk = 24
         targetSdk = 36
         versionCode = flutter.versionCode

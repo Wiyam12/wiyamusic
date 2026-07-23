@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,8 +15,8 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
 import 'dart:async';
@@ -24,22 +24,22 @@ import 'dart:async';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:musify/extensions/l10n.dart';
-import 'package:musify/services/artist_service.dart';
-import 'package:musify/services/common_services.dart';
-import 'package:musify/services/data_manager.dart';
-import 'package:musify/services/playlists_manager.dart';
-import 'package:musify/services/router_service.dart';
-import 'package:musify/utilities/artwork_provider.dart';
-import 'package:musify/utilities/flutter_toast.dart';
-import 'package:musify/utilities/offline_playlist_dialogs.dart';
-import 'package:musify/utilities/playlist_dialogs.dart';
-import 'package:musify/utilities/playlist_utils.dart';
-import 'package:musify/widgets/dialog_item.dart';
-import 'package:musify/widgets/edit_playlist_dialog.dart';
-import 'package:musify/widgets/overflow_menu_button.dart';
-import 'package:musify/widgets/popup_menu_item.dart';
-import 'package:musify/widgets/spinner.dart';
+import 'package:wiyamusic/extensions/l10n.dart';
+import 'package:wiyamusic/services/artist_service.dart';
+import 'package:wiyamusic/services/common_services.dart';
+import 'package:wiyamusic/services/data_manager.dart';
+import 'package:wiyamusic/services/playlists_manager.dart';
+import 'package:wiyamusic/services/router_service.dart';
+import 'package:wiyamusic/utilities/artwork_provider.dart';
+import 'package:wiyamusic/utilities/flutter_toast.dart';
+import 'package:wiyamusic/utilities/offline_playlist_dialogs.dart';
+import 'package:wiyamusic/utilities/playlist_dialogs.dart';
+import 'package:wiyamusic/utilities/playlist_utils.dart';
+import 'package:wiyamusic/widgets/dialog_item.dart';
+import 'package:wiyamusic/widgets/edit_playlist_dialog.dart';
+import 'package:wiyamusic/widgets/overflow_menu_button.dart';
+import 'package:wiyamusic/widgets/popup_menu_item.dart';
+import 'package:wiyamusic/widgets/spinner.dart';
 
 class PlaylistBar extends StatelessWidget {
   PlaylistBar(

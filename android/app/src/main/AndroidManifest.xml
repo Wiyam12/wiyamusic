@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.gokadzev.musify">
+    package="com.wiyamusic.app">
 
 
     <!-- Permissions -->
@@ -30,11 +30,12 @@
     </queries>
 
     <application
-        android:label="Musify"
+        android:label="WiyaMusic"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true"
         android:extractNativeLibs="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         tools:replace="android:extractNativeLibs">
 
         <!-- AudioServiceActivity -->
@@ -70,7 +71,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
-                    android:scheme="musify"
+                    android:scheme="wiyamusic"
                     android:host="playlist"
                     android:pathPattern="/custom/.*" />
             </intent-filter>

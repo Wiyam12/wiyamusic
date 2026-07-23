@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,8 +15,8 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
 import 'dart:async';
@@ -26,16 +26,16 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
-import 'package:musify/constants/clients.dart';
-import 'package:musify/main.dart' show logger;
-import 'package:musify/services/data_manager.dart';
-import 'package:musify/services/io_service.dart';
-import 'package:musify/services/lyrics_manager.dart';
-import 'package:musify/services/playlists_manager.dart';
-import 'package:musify/services/proxy_manager.dart';
-import 'package:musify/services/settings_manager.dart';
-import 'package:musify/utilities/app_utils.dart';
-import 'package:musify/utilities/formatter.dart';
+import 'package:wiyamusic/constants/clients.dart';
+import 'package:wiyamusic/main.dart' show logger;
+import 'package:wiyamusic/services/data_manager.dart';
+import 'package:wiyamusic/services/io_service.dart';
+import 'package:wiyamusic/services/lyrics_manager.dart';
+import 'package:wiyamusic/services/playlists_manager.dart';
+import 'package:wiyamusic/services/proxy_manager.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/app_utils.dart';
+import 'package:wiyamusic/utilities/formatter.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 List globalSongs = [];
@@ -128,7 +128,10 @@ Future<String?> _getCachedSongUrl(
 /// Checks if a cached URL still responds successfully.
 Future<bool> _validateCachedUrl(String cachedUrl) async {
   try {
-    final response = await http.head(Uri.parse(cachedUrl));
+    final response = await http.head(
+      Uri.parse(cachedUrl),
+      headers: youtubeStreamHeaders,
+    );
     return response.statusCode >= 200 && response.statusCode < 300;
   } catch (_) {
     return false;
@@ -250,8 +253,20 @@ Future<void> updateSongLikeStatus(
   Map? songData,
 }) async {
   try {
-    final normalizedSongId = songId?.toString().trim() ?? '';
-    if (normalizedSongId.isEmpty) return;
+    // Prefer ytid from song data — MediaItem.id may be a local queue entry id.
+    final songDataYtid = songData?['ytid']?.toString().trim();
+    var normalizedSongId = songId?.toString().trim() ?? '';
+    if (_isQueueEntryId(normalizedSongId) &&
+        songDataYtid != null &&
+        songDataYtid.isNotEmpty) {
+      normalizedSongId = songDataYtid;
+    } else if (normalizedSongId.isEmpty &&
+        songDataYtid != null &&
+        songDataYtid.isNotEmpty) {
+      normalizedSongId = songDataYtid;
+    }
+
+    if (normalizedSongId.isEmpty || _isQueueEntryId(normalizedSongId)) return;
 
     final updateToken = ++_songLikeUpdateToken;
     _latestSongLikeUpdateTokens[normalizedSongId] = updateToken;
@@ -296,15 +311,26 @@ Future<void> updateSongLikeStatus(
 }
 
 Future<Map?> _resolveSongForLikedStatus(String songId, Map? songData) async {
-  if (songData?['ytid']?.toString() == songId) {
-    return Map<String, dynamic>.from(songData!);
+  final songDataYtid = songData?['ytid']?.toString().trim();
+  if (songData != null &&
+      songDataYtid != null &&
+      songDataYtid.isNotEmpty &&
+      !_isQueueEntryId(songDataYtid)) {
+    final resolved = Map<String, dynamic>.from(songData);
+    resolved['ytid'] = songDataYtid;
+    return resolved;
   }
+
+  if (_isQueueEntryId(songId)) return null;
 
   final cachedSong = _findSongById(userLikedSongsList.value, songId);
   if (cachedSong != null) return Map<String, dynamic>.from(cachedSong);
 
   return getSongDetails(userLikedSongsList.value.length, songId);
 }
+
+bool _isQueueEntryId(String? id) =>
+    id != null && id.startsWith('queue-');
 
 Map? _findSongById(Iterable<dynamic> songs, String songId) {
   for (final song in songs) {
@@ -576,7 +602,11 @@ Future<AudioOnlyStreamInfo?> fetchBestAudioStream(String? songId) async {
 }
 
 /// Resolves a playable stream URL for a song (cached when possible).
-Future<String?> fetchSongStreamUrl(String songId, bool isLive) async {
+Future<String?> fetchSongStreamUrl(
+  String songId,
+  bool isLive, {
+  bool bypassCache = false,
+}) async {
   try {
     if (songId.isEmpty) {
       logger.log('fetchSongStreamUrl: songId is empty');
@@ -589,26 +619,31 @@ Future<String?> fetchSongStreamUrl(String songId, bool isLive) async {
     }
 
     const _cacheDuration = Duration(hours: 3);
-    final cacheKey = 'song_${songId}_${audioQualitySetting.value}_url';
+    final cacheKey = songStreamCacheKey(songId);
 
-    // Try to get from cache
-    final cachedUrl = await _getCachedSongUrl(cacheKey, _cacheDuration);
-    if (cachedUrl != null) {
-      return cachedUrl;
+    if (!bypassCache) {
+      // Try to get from cache
+      final cachedUrl = await _getCachedSongUrl(cacheKey, _cacheDuration);
+      if (cachedUrl != null) {
+        return cachedUrl;
+      }
+    } else {
+      await deleteData('cache', cacheKey);
+      await deleteData('cache', '${cacheKey}_date');
     }
 
     // Get fresh URL
     final manifest = await _fetchStreamManifest(songId);
-    final audioStreams = manifest?.audioOnly;
-    if (audioStreams == null || audioStreams.isEmpty) {
-      logger.log('fetchSongStreamUrl: no audio streams for $songId');
+    if (manifest == null) {
+      logger.log('fetchSongStreamUrl: no manifest for $songId');
       return null;
     }
 
-    final selectedStream = selectAudioOnlyStreamForQuality(
-      audioStreams.sortByBitrate(),
-    );
-    final url = selectedStream.url.toString();
+    final url = selectPlayableStreamUrl(manifest);
+    if (url == null || url.isEmpty) {
+      logger.log('fetchSongStreamUrl: no playable streams for $songId');
+      return null;
+    }
 
     unawaited(addOrUpdateData<String>('cache', cacheKey, url));
 

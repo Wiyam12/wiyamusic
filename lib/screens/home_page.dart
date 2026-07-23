@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,29 +15,29 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:musify/constants/app_constants.dart';
-import 'package:musify/extensions/l10n.dart';
-import 'package:musify/main.dart';
-import 'package:musify/services/common_services.dart';
-import 'package:musify/services/listening_stats_service.dart';
-import 'package:musify/services/playlists_manager.dart';
-import 'package:musify/services/settings_manager.dart';
-import 'package:musify/utilities/app_utils.dart';
-import 'package:musify/utilities/async_loader.dart';
-import 'package:musify/utilities/listening_stats_utils.dart';
-import 'package:musify/widgets/announcement_box.dart';
-import 'package:musify/widgets/listening_recap_card.dart';
-import 'package:musify/widgets/mini_player_bottom_space.dart';
-import 'package:musify/widgets/playlist_cube.dart';
-import 'package:musify/widgets/section_header.dart';
-import 'package:musify/widgets/song_bar.dart';
+import 'package:wiyamusic/constants/app_constants.dart';
+import 'package:wiyamusic/extensions/l10n.dart';
+import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/services/common_services.dart';
+import 'package:wiyamusic/services/listening_stats_service.dart';
+import 'package:wiyamusic/services/playlists_manager.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/app_utils.dart';
+import 'package:wiyamusic/utilities/async_loader.dart';
+import 'package:wiyamusic/utilities/listening_stats_utils.dart';
+import 'package:wiyamusic/widgets/announcement_box.dart';
+import 'package:wiyamusic/widgets/listening_recap_card.dart';
+import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
+import 'package:wiyamusic/widgets/playlist_cube.dart';
+import 'package:wiyamusic/widgets/section_header.dart';
+import 'package:wiyamusic/widgets/song_bar.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -77,7 +77,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final playlistHeight = MediaQuery.sizeOf(context).height * 0.25 / 1.1;
     return Scaffold(
-      appBar: AppBar(title: const Text('Musify.')),
+      appBar: AppBar(title: const Text('WiyaMusic.')),
       body: SingleChildScrollView(
         padding: commonSingleChildScrollViewPadding,
         child: Column(

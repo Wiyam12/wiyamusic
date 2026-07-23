@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,8 +15,8 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
 import 'dart:async';
@@ -24,47 +24,52 @@ import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:musify/main.dart';
-import 'package:musify/models/position_data.dart';
-import 'package:musify/services/common_services.dart';
-import 'package:musify/services/data_manager.dart';
-import 'package:musify/services/listening_stats_service.dart';
-import 'package:musify/services/settings_manager.dart';
-import 'package:musify/utilities/map_utils.dart';
-import 'package:musify/utilities/mediaitem.dart';
-import 'package:musify/utilities/queue_entry_utils.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:wiyamusic/constants/clients.dart';
+import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/models/position_data.dart';
+import 'package:wiyamusic/services/common_services.dart';
+import 'package:wiyamusic/services/data_manager.dart';
+import 'package:wiyamusic/services/listening_stats_service.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/app_utils.dart';
+import 'package:wiyamusic/utilities/map_utils.dart';
+import 'package:wiyamusic/utilities/mediaitem.dart';
+import 'package:wiyamusic/utilities/queue_entry_utils.dart';
 
-class MusifyAudioHandler extends BaseAudioHandler {
-  MusifyAudioHandler() {
-    _androidEqualizer = AndroidEqualizer();
-    audioPlayer = AudioPlayer(
-      audioPipeline: AudioPipeline(androidAudioEffects: [_androidEqualizer]),
-      audioLoadConfiguration: const AudioLoadConfiguration(
-        androidLoadControl: AndroidLoadControl(
-          maxBufferDuration: Duration(seconds: 60),
-          bufferForPlaybackDuration: Duration(milliseconds: 500),
-          bufferForPlaybackAfterRebufferDuration: Duration(seconds: 3),
+class WiyaMusicAudioHandler extends BaseAudioHandler {
+  WiyaMusicAudioHandler() {
+    if (Platform.isAndroid) {
+      _androidEqualizer = AndroidEqualizer();
+      audioPlayer = AudioPlayer(
+        audioPipeline: AudioPipeline(androidAudioEffects: [_androidEqualizer!]),
+        audioLoadConfiguration: const AudioLoadConfiguration(
+          androidLoadControl: AndroidLoadControl(
+            maxBufferDuration: Duration(seconds: 60),
+            bufferForPlaybackDuration: Duration(milliseconds: 500),
+            bufferForPlaybackAfterRebufferDuration: Duration(seconds: 3),
+          ),
         ),
-      ),
-    );
+      );
+      audioPlayer.setAndroidAudioAttributes(
+        const AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.music,
+          usage: AndroidAudioUsage.media,
+        ),
+      );
+    } else {
+      audioPlayer = AudioPlayer();
+    }
 
     _setupEventSubscriptions();
     _updatePlaybackState();
-
-    audioPlayer.setAndroidAudioAttributes(
-      const AndroidAudioAttributes(
-        contentType: AndroidAudioContentType.music,
-        usage: AndroidAudioUsage.media,
-      ),
-    );
-
     _initialize();
   }
 
-  late final AndroidEqualizer _androidEqualizer;
+  AndroidEqualizer? _androidEqualizer;
   late final AudioPlayer audioPlayer;
   bool _equalizerInitialized = false;
   Future<bool>? _equalizerInitFuture;
@@ -92,13 +97,20 @@ class MusifyAudioHandler extends BaseAudioHandler {
   bool _completionHandlerLoadStarted = false;
 
   String? _lastError;
-  int _consecutiveErrors = 0;
-  static const int _maxConsecutiveErrors = 3;
+
+  /// True while resolving a stream URL / setting the audio source.
+  /// UI should disable Play and ignore duplicate taps while this is true.
+  final ValueNotifier<bool> isPlayRequestPending = ValueNotifier(false);
+
+  /// Emits whenever a user-initiated play request fails (no auto-retry).
+  final StreamController<void> _playbackFailureController =
+      StreamController<void>.broadcast();
+
+  Stream<void> get playbackFailureStream => _playbackFailureController.stream;
 
   static const int _maxHistorySize = 50;
   static const int _queueLookahead = 3;
   static const int _maxConcurrentPreloads = 2;
-  static const Duration _errorRetryDelay = Duration(seconds: 2);
   static const Duration _songTransitionTimeout = Duration(seconds: 30);
   static const Duration _debounceInterval = Duration(milliseconds: 150);
   static const Duration _positionDataThreshold = Duration(milliseconds: 250);
@@ -215,7 +227,8 @@ class MusifyAudioHandler extends BaseAudioHandler {
             if (state.processingState == ProcessingState.idle &&
                 !state.playing &&
                 _lastError != null) {
-              Future.microtask(_handlePlaybackError);
+              // Keep the error for UI notification paths; do not auto-retry.
+              _lastError = null;
             }
             _debouncedStateUpdate();
           },
@@ -377,6 +390,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
   }
 
   Future<bool> _ensureEqualizerConfigured({bool force = false}) async {
+    if (!Platform.isAndroid || _androidEqualizer == null) return false;
     if (_equalizerInitialized) return true;
 
     final now = DateTime.now();
@@ -402,8 +416,11 @@ class MusifyAudioHandler extends BaseAudioHandler {
   }
 
   Future<bool> _configureEqualizer() async {
+    final equalizer = _androidEqualizer;
+    if (equalizer == null) return false;
+
     try {
-      final params = await _androidEqualizer.parameters.timeout(
+      final params = await equalizer.parameters.timeout(
         const Duration(seconds: 3),
       );
 
@@ -418,7 +435,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
         }
       }
 
-      await _androidEqualizer.setEnabled(equalizerEnabled.value);
+      await equalizer.setEnabled(equalizerEnabled.value);
       _equalizerInitialized = true;
       _equalizerRetryNotBefore = DateTime.fromMillisecondsSinceEpoch(0);
       return true;
@@ -436,10 +453,13 @@ class MusifyAudioHandler extends BaseAudioHandler {
   }
 
   Future<AndroidEqualizerParameters?> getEqualizerParameters() async {
+    final equalizer = _androidEqualizer;
+    if (equalizer == null) return null;
+
     final initialized = await _ensureEqualizerConfigured();
     if (!initialized) return null;
     try {
-      return await _androidEqualizer.parameters.timeout(
+      return await equalizer.parameters.timeout(
         const Duration(seconds: 2),
       );
     } catch (e, stackTrace) {
@@ -453,10 +473,13 @@ class MusifyAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> setEqualizerEnabled(bool enabled) async {
+    final equalizer = _androidEqualizer;
+    if (equalizer == null) return;
+
     final initialized = await _ensureEqualizerConfigured(force: true);
     if (!initialized) return;
     try {
-      await _androidEqualizer.setEnabled(enabled);
+      await equalizer.setEnabled(enabled);
       equalizerEnabled.value = enabled;
       unawaited(addOrUpdateData<bool>('settings', 'equalizerEnabled', enabled));
     } catch (e, stackTrace) {
@@ -469,11 +492,14 @@ class MusifyAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> setEqualizerBandGain(int index, double gain) async {
+    final equalizer = _androidEqualizer;
+    if (equalizer == null) return;
+
     final initialized = await _ensureEqualizerConfigured(force: true);
     if (!initialized) return;
 
     try {
-      final params = await _androidEqualizer.parameters;
+      final params = await equalizer.parameters;
       if (index < 0 || index >= params.bands.length) {
         return;
       }
@@ -496,11 +522,14 @@ class MusifyAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> resetEqualizerBands() async {
+    final equalizer = _androidEqualizer;
+    if (equalizer == null) return;
+
     final initialized = await _ensureEqualizerConfigured(force: true);
     if (!initialized) return;
 
     try {
-      final params = await _androidEqualizer.parameters;
+      final params = await equalizer.parameters;
       for (final band in params.bands) {
         await band.setGain(0);
       }
@@ -673,29 +702,20 @@ class MusifyAudioHandler extends BaseAudioHandler {
     }
   }
 
-  bool _canRetryPlayback() =>
-      hasNext ||
-      (repeatNotifier.value == AudioServiceRepeatMode.all &&
-          _queueList.isNotEmpty) ||
-      playNextSongAutomatically.value;
-
-  void _handlePlaybackError() {
-    _consecutiveErrors++;
+  void _handlePlaybackError({bool notifyUser = true}) {
     logger.log(
-      'Playback error occurred. Consecutive errors: $_consecutiveErrors',
+      'Playback request failed',
       error: _lastError,
     );
 
-    if (_consecutiveErrors >= _maxConsecutiveErrors) {
-      logger.log('Max consecutive errors reached. Stopping playback.');
-      stop();
-      return;
+    if (notifyUser && !_playbackFailureController.isClosed) {
+      _playbackFailureController.add(null);
     }
+  }
 
-    if (_canRetryPlayback()) {
-      Future.delayed(_errorRetryDelay, skipToNext);
-    } else {
-      _lastError = null;
+  void _setPlayRequestPending(bool pending) {
+    if (isPlayRequestPending.value != pending) {
+      isPlayRequestPending.value = pending;
     }
   }
 
@@ -1205,8 +1225,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
       return;
     }
 
-    // If already loading any song, skip the request
-    // UNLESS we're in the middle of handling a completion event (allow one load attempt)
+    // Ignore duplicate taps for the same index while that load is in flight.
     if (_currentLoadingIndex == index && !_completionEventPending) {
       return;
     }
@@ -1221,11 +1240,12 @@ class MusifyAudioHandler extends BaseAudioHandler {
       return;
     }
 
-    // Start new transition
+    // Start new transition (supersedes an in-flight load for a different song)
     _songTransitionCounter++;
     final currentTransitionId = _songTransitionCounter;
     _currentLoadingIndex = index;
     _currentLoadingTransitionId = currentTransitionId;
+    _setPlayRequestPending(true);
 
     try {
       final previousQueueIndex = _currentQueueIndex;
@@ -1254,7 +1274,6 @@ class MusifyAudioHandler extends BaseAudioHandler {
       // Only process result if this is still the current transition
       if (currentTransitionId == _currentLoadingTransitionId) {
         if (success) {
-          _consecutiveErrors = 0;
           _preloadUpcomingSongs();
           // Trigger background song addition if auto-play is enabled
           if (playNextSongAutomatically.value) {
@@ -1271,12 +1290,15 @@ class MusifyAudioHandler extends BaseAudioHandler {
       }
     } catch (e, stackTrace) {
       logger.log('Error playing from queue', error: e, stackTrace: stackTrace);
-      _handlePlaybackError();
+      if (currentTransitionId == _currentLoadingTransitionId) {
+        _handlePlaybackError();
+      }
     } finally {
       // Only reset if this is still the transition that started it
       if (currentTransitionId == _currentLoadingTransitionId) {
         _currentLoadingIndex = -1;
         _currentLoadingTransitionId = -1;
+        _setPlayRequestPending(false);
       }
     }
   }
@@ -1479,7 +1501,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     return mapToMediaItem(normalisedSong).copyWith(
       id: _recentMediaId(ytid),
       displayTitle: normalisedSong['title']?.toString(),
-      displaySubtitle: artist.isEmpty ? 'Musify' : artist,
+      displaySubtitle: artist.isEmpty ? 'WiyaMusic' : artist,
     );
   }
 
@@ -1489,7 +1511,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
 
     await playPlaylistSong(
       playlist: {
-        'title': 'Musify',
+        'title': 'WiyaMusic',
         'source': 'system-recent',
         'list': [normalisedSong],
       },
@@ -1664,6 +1686,12 @@ class MusifyAudioHandler extends BaseAudioHandler {
   @override
   Future<void> play() async {
     try {
+      // Ignore rapid Play taps while a stream request is already in flight.
+      if (isPlayRequestPending.value) {
+        logger.log('Ignoring play(); a playback request is already pending');
+        return;
+      }
+
       if (audioPlayer.audioSource == null) {
         final recentSong = _latestResumableSong();
         if (recentSong != null) {
@@ -1682,12 +1710,14 @@ class MusifyAudioHandler extends BaseAudioHandler {
             stackTrace: stackTrace,
           );
           _lastError = e.toString();
+          _handlePlaybackError();
         }),
       );
       listeningStatsService.resumeListeningSession(currentSong: currentSong);
     } catch (e, stackTrace) {
       logger.log('Error in play()', error: e, stackTrace: stackTrace);
       _lastError = e.toString();
+      _handlePlaybackError();
     }
   }
 
@@ -1711,7 +1741,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     _currentLoadingIndex = -1;
     _currentLoadingTransitionId = -1;
     _lastError = null;
-    _consecutiveErrors = 0;
+    _setPlayRequestPending(false);
     try {
       listeningStatsService.finishListeningSession(
         countCurrentTick: true,
@@ -1818,11 +1848,29 @@ class MusifyAudioHandler extends BaseAudioHandler {
   }
 
   Future<bool> playSong(Map song, {String? mediaId, int? transitionId}) async {
+    // Direct play calls (no queue transition) must not stack while another
+    // request is already resolving a stream.
+    final ownsRequestLock = transitionId == null;
+    if (ownsRequestLock && isPlayRequestPending.value) {
+      logger.log(
+        'Ignoring playSong; a playback request is already pending',
+      );
+      return false;
+    }
+
+    if (ownsRequestLock) {
+      _songTransitionCounter++;
+      transitionId = _songTransitionCounter;
+      _currentLoadingTransitionId = transitionId;
+      _setPlayRequestPending(true);
+    }
+
     try {
       final songData = cloneMap(song);
 
       if (songData['ytid'] == null || songData['ytid'].toString().isEmpty) {
         logger.log('Invalid song data: missing ytid');
+        _lastError = 'Invalid song data';
         return false;
       }
 
@@ -1833,6 +1881,14 @@ class MusifyAudioHandler extends BaseAudioHandler {
         );
         await audioPlayer.pause();
       }
+
+      // Show loading immediately so rapid taps see a disabled Play state
+      // before the stream URL network call returns.
+      _emitOptimisticLoadingState(
+        song: songData,
+        includeMediaItem: true,
+        mediaId: mediaId,
+      );
 
       final playback = await _resolvePlaybackSource(songData);
 
@@ -1848,14 +1904,12 @@ class MusifyAudioHandler extends BaseAudioHandler {
 
       if (playback == null) {
         _lastError = 'Failed to get song URL';
+        if (ownsRequestLock) {
+          _updatePlaybackState();
+          _handlePlaybackError();
+        }
         return false;
       }
-
-      _emitOptimisticLoadingState(
-        song: songData,
-        includeMediaItem: true,
-        mediaId: mediaId,
-      );
 
       final audioSource = await buildAudioSource(
         songData,
@@ -1874,10 +1928,14 @@ class MusifyAudioHandler extends BaseAudioHandler {
       if (audioSource == null) {
         logger.log('Failed to build audio source for ${songData['ytid']}');
         _lastError = 'Failed to build audio source';
+        if (ownsRequestLock) {
+          _updatePlaybackState();
+          _handlePlaybackError();
+        }
         return false;
       }
 
-      return await _setAudioSourceAndPlay(
+      final success = await _setAudioSourceAndPlay(
         songData,
         audioSource,
         playback.songUrl,
@@ -1885,10 +1943,29 @@ class MusifyAudioHandler extends BaseAudioHandler {
         mediaId: mediaId,
         transitionId: transitionId,
       );
+
+      if (!success &&
+          ownsRequestLock &&
+          !_isStaleTransition(transitionId) &&
+          _lastError != null) {
+        _updatePlaybackState();
+        _handlePlaybackError();
+      }
+
+      return success;
     } catch (e, stackTrace) {
       logger.log('Error playing song', error: e, stackTrace: stackTrace);
       _lastError = e.toString();
+      if (ownsRequestLock && !_isStaleTransition(transitionId)) {
+        _updatePlaybackState();
+        _handlePlaybackError();
+      }
       return false;
+    } finally {
+      if (ownsRequestLock && transitionId == _currentLoadingTransitionId) {
+        _currentLoadingTransitionId = -1;
+        _setPlayRequestPending(false);
+      }
     }
   }
 
@@ -1981,8 +2058,8 @@ class MusifyAudioHandler extends BaseAudioHandler {
     String songUrl,
     bool isOffline, {
     String? mediaId,
-    bool allowOnlineRetry = true,
     int? transitionId,
+    bool allowFreshUrlRetry = true,
   }) async {
     try {
       // Final staleness check before we touch the audio player.
@@ -2030,8 +2107,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
       unawaited(updateRecentlyPlayed(song['ytid'], songFallback: song));
 
       if (!isOffline) {
-        final cacheKey =
-            'song_${song['ytid']}_${audioQualitySetting.value}_url';
+        final cacheKey = songStreamCacheKey(song['ytid'].toString());
         unawaited(addOrUpdateData<String>('cache', cacheKey, songUrl));
       }
 
@@ -2065,22 +2141,22 @@ class MusifyAudioHandler extends BaseAudioHandler {
         );
       }
 
-      if (allowOnlineRetry) {
-        if (offlineMode.value) {
-          _lastError = e.toString();
-          return false;
-        }
+      // One refresh within this same user Play tap for expired/403 CDN URLs.
+      // Does not skip to another song or loop.
+      if (allowFreshUrlRetry &&
+          !offlineMode.value &&
+          !_isStaleTransition(transitionId)) {
         final songId = song['ytid']?.toString();
         if (songId != null && songId.isNotEmpty) {
-          final cacheKey = 'song_${songId}_${audioQualitySetting.value}_url';
-          await deleteData('cache', cacheKey);
-
           final refreshedUrl = await fetchSongStreamUrl(
             songId,
             song['isLive'] ?? false,
+            bypassCache: true,
           );
 
-          if (refreshedUrl != null && refreshedUrl.isNotEmpty) {
+          if (refreshedUrl != null &&
+              refreshedUrl.isNotEmpty &&
+              refreshedUrl != songUrl) {
             final refreshedSource = await buildAudioSource(
               song,
               refreshedUrl,
@@ -2094,8 +2170,8 @@ class MusifyAudioHandler extends BaseAudioHandler {
                 refreshedUrl,
                 false,
                 mediaId: mediaId,
-                allowOnlineRetry: false,
                 transitionId: transitionId,
+                allowFreshUrlRetry: false,
               );
             }
           }
@@ -2164,6 +2240,14 @@ class MusifyAudioHandler extends BaseAudioHandler {
     required String image,
     String? genre,
   }) async {
+    if (isPlayRequestPending.value) {
+      logger.log(
+        'Ignoring playRadioStream; a playback request is already pending',
+      );
+      return false;
+    }
+
+    _setPlayRequestPending(true);
     try {
       // Create a song-like map for the radio stream
       final radioSong = {
@@ -2190,6 +2274,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
       final mediaItem = mapToMediaItem(radioSong);
       this.mediaItem.add(mediaItem);
       queue.add([mediaItem]);
+      _emitOptimisticLoadingState(song: radioSong, includeMediaItem: true);
 
       // Build audio source from stream URL
       final audioSource = await buildAudioSource(
@@ -2201,6 +2286,8 @@ class MusifyAudioHandler extends BaseAudioHandler {
       if (audioSource == null) {
         logger.log('Failed to build audio source for radio stream: $id');
         _lastError = 'Failed to load radio stream';
+        _updatePlaybackState();
+        _handlePlaybackError();
         return false;
       }
 
@@ -2210,7 +2297,6 @@ class MusifyAudioHandler extends BaseAudioHandler {
       await audioPlayer
           .setAudioSource(audioSource)
           .timeout(_songTransitionTimeout);
-
 
       listeningStatsService.finishListeningSession(
         countCurrentTick: true,
@@ -2235,7 +2321,11 @@ class MusifyAudioHandler extends BaseAudioHandler {
         stackTrace: stackTrace,
       );
       _lastError = e.toString();
+      _updatePlaybackState();
+      _handlePlaybackError();
       return false;
+    } finally {
+      _setPlayRequestPending(false);
     }
   }
 
@@ -2252,7 +2342,11 @@ class MusifyAudioHandler extends BaseAudioHandler {
       }
 
       final uri = Uri.parse(songUrl);
-      final audioSource = AudioSource.uri(uri, tag: tag);
+      final audioSource = AudioSource.uri(
+        uri,
+        headers: youtubeStreamHeaders,
+        tag: tag,
+      );
 
       if (!sponsorBlockSupport.value) {
         return audioSource;

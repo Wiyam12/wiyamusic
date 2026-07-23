@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,22 +15,26 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
+
+import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:musify/constants/app_constants.dart';
-import 'package:musify/extensions/l10n.dart';
-import 'package:musify/main.dart';
-import 'package:musify/services/settings_manager.dart';
-import 'package:musify/utilities/flutter_bottom_sheet.dart'
+import 'package:simple_clean_navbar/simple_clean_navbar.dart';
+import 'package:wiyamusic/constants/app_constants.dart';
+import 'package:wiyamusic/extensions/l10n.dart';
+import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/flutter_bottom_sheet.dart'
     show closeCurrentBottomSheet;
-import 'package:musify/widgets/mini_player.dart';
+import 'package:wiyamusic/utilities/flutter_toast.dart';
+import 'package:wiyamusic/widgets/mini_player.dart';
 
 class BottomNavigationPage extends StatefulWidget {
   const BottomNavigationPage({required this.child, super.key});
@@ -46,10 +50,34 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
       .map((mediaItem) => mediaItem != null)
       .distinct();
 
+  StreamSubscription<void>? _playbackFailureSubscription;
+
   bool? _previousOfflineMode;
 
   /// Track the previously selected tab index to detect double-taps on the same tab.
   int? _previousTabIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _playbackFailureSubscription = audioHandler.playbackFailureStream.listen((
+      _,
+    ) {
+      if (!mounted) return;
+      showToast(
+        context,
+        context.l10n?.playbackRequestFailed ??
+            'Something went wrong. Please check your internet connection and try again.',
+        icon: FluentIcons.error_circle_24_regular,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _playbackFailureSubscription?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,11 +106,12 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
 
           return LayoutBuilder(
             builder: (context, constraints) {
-              final isLargeScreen = MediaQuery.of(context).size.width >= 600;
+              final isLargeScreen = MediaQuery.sizeOf(context).width >= 600;
               final items = _getNavigationItems(isOfflineMode);
 
               return Scaffold(
                 body: SafeArea(
+                  bottom: false,
                   child: Row(
                     children: [
                       if (isLargeScreen)
@@ -108,13 +137,14 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                           builder: (context, snapshot) {
                             final mediaQuery = MediaQuery.of(context);
                             final isMiniPlayerVisible = snapshot.data ?? false;
-                            final bottomPadding = !isMiniPlayerVisible
-                                ? mediaQuery.padding.bottom
-                                : mediaQuery.padding.bottom +
-                                      miniPlayerTotalHeight;
+                            final safeBottom = mediaQuery.padding.bottom;
+                            final bottomPadding = _contentBottomPadding(
+                              safeBottom: safeBottom,
+                              isLargeScreen: isLargeScreen,
+                              isMiniPlayerVisible: isMiniPlayerVisible,
+                            );
 
                             return Stack(
-                              alignment: Alignment.bottomCenter,
                               children: [
                                 MediaQuery(
                                   data: mediaQuery.copyWith(
@@ -124,13 +154,26 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                                   ),
                                   child: widget.child,
                                 ),
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 8,
+                                if (isMiniPlayerVisible)
+                                  Positioned(
+                                    left: 8,
+                                    right: 8,
+                                    bottom: isLargeScreen
+                                        ? 8 + safeBottom
+                                        : _floatingNavOccupiedHeight(
+                                                safeBottom,
+                                              ) +
+                                              floatingNavMiniPlayerGap,
+                                    child: const MiniPlayer(),
                                   ),
-                                  child: MiniPlayer(),
-                                ),
+                                if (!isLargeScreen)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: _buildFloatingNavBar(
+                                      items: items,
+                                      isOfflineMode: isOfflineMode,
+                                    ),
+                                  ),
                               ],
                             );
                           },
@@ -139,31 +182,62 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                     ],
                   ),
                 ),
-                bottomNavigationBar: !isLargeScreen
-                    ? NavigationBar(
-                        selectedIndex: _getCurrentIndex(items, isOfflineMode),
-                        labelBehavior: languageSetting == const Locale('en', '')
-                            ? NavigationDestinationLabelBehavior
-                                  .onlyShowSelected
-                            : NavigationDestinationLabelBehavior.alwaysHide,
-                        onDestinationSelected: (index) =>
-                            _onTabTapped(index, items),
-                        destinations: items
-                            .map(
-                              (item) => NavigationDestination(
-                                icon: Icon(item.icon),
-                                selectedIcon: Icon(item.selectedIcon),
-                                label: item.label,
-                              ),
-                            )
-                            .toList(),
-                      )
-                    : null,
               );
             },
           );
         },
       ),
+    );
+  }
+
+  /// Matches simple_clean_navbar floating layout: height 70 + margin 20.
+  double _floatingNavOccupiedHeight(double safeBottom) {
+    return floatingNavBarHeight + floatingNavBarMargin + safeBottom;
+  }
+
+  double _contentBottomPadding({
+    required double safeBottom,
+    required bool isLargeScreen,
+    required bool isMiniPlayerVisible,
+  }) {
+    if (isLargeScreen) {
+      return isMiniPlayerVisible
+          ? safeBottom + miniPlayerTotalHeight
+          : safeBottom;
+    }
+
+    final navSpace = _floatingNavOccupiedHeight(safeBottom);
+    final miniSpace = isMiniPlayerVisible
+        ? MiniPlayer.playerHeight + floatingNavMiniPlayerGap
+        : 0.0;
+
+    return navSpace + miniSpace;
+  }
+
+  Widget _buildFloatingNavBar({
+    required List<_NavigationItem> items,
+    required bool isOfflineMode,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final onlyShowSelectedLabels = languageSetting == const Locale('en', '');
+
+    return SimpleCleanNavBar.advanced(
+      currentIndex: _getCurrentIndex(items, isOfflineMode),
+      onTap: (index) => _onTabTapped(index, items),
+      items: items
+          .map((item) => SimpleNavBarItem(label: item.label, icon: item.icon))
+          .toList(),
+      backgroundColor: colorScheme.surfaceContainerHigh,
+      selectedColor: colorScheme.primary,
+      unselectedColor: colorScheme.onSurfaceVariant,
+      discColor: colorScheme.primaryContainer,
+      isFloating: true,
+      animationType: SimpleNavAnimType.float,
+      textMode: onlyShowSelectedLabels
+          ? SimpleNavTextMode.onSelect
+          : SimpleNavTextMode.neverShow,
+      // System UI is already handled in main.dart.
+      updateSystemNavBar: false,
     );
   }
 

@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,22 +15,22 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:musify/extensions/l10n.dart';
-import 'package:musify/main.dart';
-import 'package:musify/services/common_services.dart';
-import 'package:musify/services/settings_manager.dart';
-import 'package:musify/utilities/flutter_bottom_sheet.dart';
-import 'package:musify/utilities/flutter_toast.dart';
-import 'package:musify/utilities/mediaitem.dart';
-import 'package:musify/utilities/playlist_dialogs.dart';
-import 'package:musify/widgets/queue_list_view.dart';
+import 'package:wiyamusic/extensions/l10n.dart';
+import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/services/common_services.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/flutter_bottom_sheet.dart';
+import 'package:wiyamusic/utilities/flutter_toast.dart';
+import 'package:wiyamusic/utilities/mediaitem.dart';
+import 'package:wiyamusic/utilities/playlist_dialogs.dart';
+import 'package:wiyamusic/widgets/queue_list_view.dart';
 
 class BottomActionsRow extends StatefulWidget {
   const BottomActionsRow({
@@ -52,8 +52,16 @@ class BottomActionsRow extends StatefulWidget {
 class _BottomActionsRowState extends State<BottomActionsRow> {
   late final ValueNotifier<bool> _songLikeStatus;
   late final ValueNotifier<bool> _songOfflineStatus;
-  late final String? audioId = widget.metadata.id;
-  late final bool isRadioStation = widget.metadata.extras?['isLive'] ?? false;
+
+  /// YouTube video id for songs; queue MediaItem.id is a local queue entry id.
+  String? get audioId {
+    if (isRadioStation) return widget.metadata.id;
+    final ytid = widget.metadata.extras?['ytid']?.toString().trim();
+    if (ytid != null && ytid.isNotEmpty) return ytid;
+    return widget.metadata.id;
+  }
+
+  bool get isRadioStation => widget.metadata.extras?['isLive'] == true;
 
   @override
   void initState() {

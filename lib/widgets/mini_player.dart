@@ -1,12 +1,12 @@
 /*
  *     Copyright (C) 2026 Valeri Gokadze
  *
- *     Musify is free software: you can redistribute it and/or modify
+ *     WiyaMusic is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
  *
- *     Musify is distributed in the hope that it will be useful,
+ *     WiyaMusic is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
@@ -15,8 +15,8 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     For more information about WiyaMusic, including how to contribute,
+ *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
 import 'dart:math' as math;
@@ -24,12 +24,12 @@ import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:musify/main.dart';
-import 'package:musify/models/full_player_state.dart';
-import 'package:musify/models/position_data.dart';
-import 'package:musify/screens/now_playing_page.dart';
-import 'package:musify/widgets/marquee.dart';
-import 'package:musify/widgets/song_artwork.dart';
+import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/models/full_player_state.dart';
+import 'package:wiyamusic/models/position_data.dart';
+import 'package:wiyamusic/screens/now_playing_page.dart';
+import 'package:wiyamusic/widgets/marquee.dart';
+import 'package:wiyamusic/widgets/song_artwork.dart';
 import 'package:rxdart/rxdart.dart';
 
 final Stream<FullPlayerState> _fullPlayerStateStream =
@@ -391,57 +391,65 @@ class _CircularPlayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final processingState = playbackState.processingState;
-    final isPlaying = playbackState.playing;
-    final isLoading =
-        processingState == AudioProcessingState.loading ||
-        processingState == AudioProcessingState.buffering;
-    final isCompleted = processingState == AudioProcessingState.completed;
+    return ValueListenableBuilder<bool>(
+      valueListenable: audioHandler.isPlayRequestPending,
+      builder: (context, playRequestPending, _) {
+        final processingState = playbackState.processingState;
+        final isPlaying = playbackState.playing;
+        final isLoading =
+            playRequestPending ||
+            processingState == AudioProcessingState.loading ||
+            processingState == AudioProcessingState.buffering;
+        final isCompleted = processingState == AudioProcessingState.completed;
 
-    return SizedBox(
-      width: 48,
-      height: 48,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CustomPaint(
-            size: const Size(48, 48),
-            painter: _CircularProgressPainter(
-              progress: progress,
-              backgroundColor: colorScheme.surfaceContainerHighest,
-              progressColor: colorScheme.primary,
-              strokeWidth: 3,
-            ),
+        return SizedBox(
+          width: 48,
+          height: 48,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                size: const Size(48, 48),
+                painter: _CircularProgressPainter(
+                  progress: progress,
+                  backgroundColor: colorScheme.surfaceContainerHighest,
+                  progressColor: colorScheme.primary,
+                  strokeWidth: 3,
+                ),
+              ),
+              if (isLoading)
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      colorScheme.primary,
+                    ),
+                  ),
+                )
+              else
+                IconButton(
+                  onPressed: isCompleted
+                      ? () => audioHandler.playAgain()
+                      : (isPlaying ? audioHandler.pause : audioHandler.play),
+                  splashColor: Colors.transparent,
+                  highlightColor: Colors.transparent,
+                  icon: Icon(
+                    isCompleted
+                        ? FluentIcons.arrow_counterclockwise_24_filled
+                        : (isPlaying
+                              ? FluentIcons.pause_16_filled
+                              : FluentIcons.play_16_filled),
+                    color: colorScheme.primary,
+                    size: 22,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+            ],
           ),
-          if (isLoading)
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
-              ),
-            )
-          else
-            IconButton(
-              onPressed: isCompleted
-                  ? () => audioHandler.playAgain()
-                  : (isPlaying ? audioHandler.pause : audioHandler.play),
-              splashColor: Colors.transparent,
-              highlightColor: Colors.transparent,
-              icon: Icon(
-                isCompleted
-                    ? FluentIcons.arrow_counterclockwise_24_filled
-                    : (isPlaying
-                          ? FluentIcons.pause_16_filled
-                          : FluentIcons.play_16_filled),
-                color: colorScheme.primary,
-                size: 22,
-              ),
-              visualDensity: VisualDensity.compact,
-            ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

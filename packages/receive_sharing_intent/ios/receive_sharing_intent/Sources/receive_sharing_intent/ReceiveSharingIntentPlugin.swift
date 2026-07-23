@@ -2,7 +2,7 @@ import Flutter
 import UIKit
 import Photos
 
-public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
+public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     static let kMessagesChannel = "receive_sharing_intent/messages";
     static let kEventsChannelMedia = "receive_sharing_intent/events-media";
     static let kEventsChannelLink = "receive_sharing_intent/events-text";
@@ -21,7 +21,7 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
     // Singleton is required for calling functions directly from AppDelegate
     // - it is required if the developer is using also another library, which requires to call "application(_:open:options:)"
     // -> see Example app
-    public static let instance = SwiftReceiveSharingIntentPlugin()
+    public static let instance = ReceiveSharingIntentPlugin()
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: kMessagesChannel, binaryMessenger: registrar.messenger())

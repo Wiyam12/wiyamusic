@@ -1,4 +1,4 @@
-/// Minimal YouTube Music APIs used by Musify.
+/// Minimal YouTube Music APIs used by WiyaMusic.
 library;
 
 export 'src/music_client.dart';

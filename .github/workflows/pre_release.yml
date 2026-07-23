@@ -46,13 +46,13 @@ jobs:
     - name: Release arm64 APK
       uses: svenstaro/upload-release-action@v2
       with:
-        repo_name: gokadzev/Musify
+        repo_name: Wiyam12/wiyamusic
         repo_token: ${{ secrets.GITHUB_TOKEN }}
         file: build/app/outputs/flutter-apk/app-arm64-v8a-github-release.apk
-        asset_name: Musify-arm64-v8a.apk
+        asset_name: WiyaMusic-arm64-v8a.apk
         tag: ${{ github.ref }}
         prerelease: true
         overwrite: true
-        body: "**New Musify Pre-Release!** \n
+        body: "**New WiyaMusic Pre-Release!** \n
         with pre-release / [BETA] builds you have access to the latest build of the app before it is released as stable-release version. Only use pre-release if you test the app, provide feedback, and help us improve its performance. Please note that pre-release versions of the app may be pretty unstable. You may experience crashes, bugs, or other issues while using the app. This is because pre-release version is still in development.
         "
