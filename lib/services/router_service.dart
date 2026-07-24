@@ -27,6 +27,7 @@ import 'package:wiyamusic/screens/about_page.dart';
 import 'package:wiyamusic/screens/artist_page.dart';
 import 'package:wiyamusic/screens/bottom_navigation_page.dart';
 import 'package:wiyamusic/screens/equalizer_page.dart';
+import 'package:wiyamusic/screens/genre_page.dart';
 import 'package:wiyamusic/screens/home_page.dart';
 import 'package:wiyamusic/screens/library_page.dart';
 import 'package:wiyamusic/screens/playlist_folder_page.dart';
@@ -239,6 +240,17 @@ class NavigationManager {
                   state: state,
                 ),
               ),
+              GoRoute(
+                path: 'genre/:genreName',
+                pageBuilder: (context, state) => _pushPage(
+                  child: GenrePage(
+                    genreName: _decodePathParameter(
+                      state.pathParameters['genreName'],
+                    ),
+                  ),
+                  state: state,
+                ),
+              ),
             ],
           ),
         ],
@@ -278,6 +290,18 @@ class NavigationManager {
                 path: 'radioStations',
                 pageBuilder: (context, state) =>
                     _pushPage(child: const RadioStationsPage(), state: state),
+              ),
+              GoRoute(
+                path: 'folder/:folderId/:folderName',
+                pageBuilder: (context, state) => _pushPage(
+                  child: PlaylistFolderPage(
+                    folderId: state.pathParameters['folderId'] ?? '',
+                    folderName: _decodePathParameter(
+                      state.pathParameters['folderName'],
+                    ),
+                  ),
+                  state: state,
+                ),
               ),
             ],
           ),

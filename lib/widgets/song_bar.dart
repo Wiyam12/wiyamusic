@@ -51,6 +51,7 @@ List<PopupMenuEntry<String>> _buildSongMenuItems({
   bool canRename = false,
   bool canRemove = false,
   bool showGoToArtist = false,
+  bool isDownloading = false,
 }) {
   final l10n = context.l10n!;
   final playNextText = l10n.playNext;
@@ -136,12 +137,13 @@ List<PopupMenuEntry<String>> _buildSongMenuItems({
         label: removeFromRecentlyPlayedText,
         colorScheme: colorScheme,
       ),
-    if (!offlineMode.value || songOfflineStatus.value)
+    if (!isDownloading && (!offlineMode.value || songOfflineStatus.value))
       PopupMenuItem<String>(
         value: 'offline',
         child: ValueListenableBuilder<bool>(
           valueListenable: songOfflineStatus,
           builder: (_, value, __) {
+            // Already offline: only allow removal (no re-download).
             return Row(
               children: [
                 Icon(
@@ -247,28 +249,61 @@ Future<void> _toggleSongOfflineStatus(
   String ytid,
   ValueNotifier<bool> songOfflineStatus,
 ) async {
-  final originalValue = songOfflineStatus.value;
-  songOfflineStatus.value = !originalValue;
+  if (ytid.isEmpty) {
+    if (context.mounted) showToast(context, context.l10n!.error);
+    return;
+  }
+
+  // Already offline → remove from offline storage.
+  if (songOfflineStatus.value || isSongAlreadyOffline(ytid)) {
+    try {
+      final success = await removeSongFromOffline(ytid);
+      if (success) {
+        songOfflineStatus.value = false;
+        if (context.mounted) {
+          showToast(context, context.l10n!.songRemovedFromOffline);
+        }
+      } else if (context.mounted) {
+        showToast(context, context.l10n!.error);
+      }
+    } catch (e) {
+      logger.log('Error removing offline song', error: e);
+      if (context.mounted) showToast(context, context.l10n!.error);
+    }
+    return;
+  }
+
+  // Prevent duplicate downloads — one tap starts at most one request.
+  if (isSongDownloading(ytid)) {
+    if (context.mounted) {
+      showToast(context, context.l10n!.alreadyDownloading);
+    }
+    return;
+  }
 
   try {
-    final bool success;
-    if (originalValue) {
-      success = await removeSongFromOffline(ytid);
-      if (success && context.mounted) {
-        showToast(context, context.l10n!.songRemovedFromOffline);
-      }
-    } else {
-      success = await makeSongOffline(song);
-      if (success && context.mounted) {
+    final success = await makeSongOffline(song, cancelExisting: false);
+    if (success) {
+      songOfflineStatus.value = true;
+      if (context.mounted) {
         showToast(context, context.l10n!.songAddedToOffline);
       }
+    } else {
+      songOfflineStatus.value = false;
+      if (context.mounted) {
+        showToast(context, context.l10n!.error);
+      }
     }
-
-    if (!success) {
-      songOfflineStatus.value = originalValue;
+  } on SongOfflineRateLimited {
+    songOfflineStatus.value = false;
+    if (context.mounted) {
+      showToast(
+        context,
+        'YouTube rate limit reached. Please wait a bit and try again.',
+      );
     }
   } catch (e) {
-    songOfflineStatus.value = originalValue;
+    songOfflineStatus.value = false;
     logger.log('Error toggling offline status', error: e);
     if (context.mounted) {
       showToast(context, context.l10n!.error);
@@ -440,18 +475,23 @@ class _SongBarState extends State<SongBar> {
                 ),
               ),
 
-              OverflowMenuButton<String>(
-                onSelected: (value) => _handleSongMenuAction(
-                  context: context,
-                  value: value,
-                  song: widget.song,
-                  ytid: _ytid,
-                  songLikeStatus: _songLikeStatus,
-                  songOfflineStatus: _songOfflineStatus,
-                  onRemove: widget.onRemove,
-                  onRename: () => _handleRenameSong(context),
+              _SongOfflineTrailing(
+                ytid: _ytid,
+                offlineStatus: _songOfflineStatus,
+                menuButton: OverflowMenuButton<String>(
+                  onSelected: (value) => _handleSongMenuAction(
+                    context: context,
+                    value: value,
+                    song: widget.song,
+                    ytid: _ytid,
+                    songLikeStatus: _songLikeStatus,
+                    songOfflineStatus: _songOfflineStatus,
+                    onRemove: widget.onRemove,
+                    onRename: () => _handleRenameSong(context),
+                  ),
+                  itemBuilder: (context) =>
+                      _buildMenuItems(context, colorScheme),
                 ),
-                itemBuilder: (context) => _buildMenuItems(context, colorScheme),
               ),
             ],
           ),
@@ -564,6 +604,74 @@ class _SongBarState extends State<SongBar> {
       canRename: canRename,
       canRemove: widget.onRemove != null,
       showGoToArtist: _songArtist.isNotEmpty,
+      isDownloading: isSongDownloading(_ytid),
+    );
+  }
+}
+
+class _SongOfflineTrailing extends StatelessWidget {
+  const _SongOfflineTrailing({
+    required this.ytid,
+    required this.offlineStatus,
+    required this.menuButton,
+  });
+
+  final String ytid;
+  final ValueListenable<bool> offlineStatus;
+  final Widget menuButton;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final progressListenable = songDownloadProgressNotifier(ytid);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ValueListenableBuilder<bool>(
+          valueListenable: offlineStatus,
+          builder: (context, isOffline, _) {
+            return ValueListenableBuilder<double?>(
+              valueListenable: progressListenable,
+              builder: (context, progress, _) {
+                final isDownloading = progress != null;
+                if (!isOffline && !isDownloading) {
+                  return const SizedBox.shrink();
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 2),
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        if (isDownloading)
+                          CircularProgressIndicator(
+                            value: progress.clamp(0.0, 1.0),
+                            strokeWidth: 2.4,
+                            backgroundColor: colorScheme.onSurfaceVariant
+                                .withValues(alpha: 0.2),
+                            color: colorScheme.primary,
+                          ),
+                        Icon(
+                          FluentIcons.cloud_off_24_regular,
+                          size: 15,
+                          color: isDownloading
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+        menuButton,
+      ],
     );
   }
 }

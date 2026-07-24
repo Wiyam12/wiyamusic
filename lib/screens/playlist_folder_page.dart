@@ -21,9 +21,11 @@
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:wiyamusic/constants/app_constants.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
+import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/utilities/app_utils.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
@@ -410,16 +412,25 @@ class _PlaylistFolderPageState extends State<PlaylistFolderPage> {
   }
 
   void _showDeleteFolderDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => ConfirmationDialog(
-        submitMessage: context.l10n!.delete,
-        confirmationMessage: context.l10n!.deleteFolderQuestion,
-        onCancel: () => Navigator.of(context).pop(),
+    final pageContext = context;
+    showDialog<void>(
+      context: pageContext,
+      builder: (dialogContext) => ConfirmationDialog(
+        submitMessage: pageContext.l10n!.delete,
+        confirmationMessage: pageContext.l10n!.deleteFolderQuestion,
+        onCancel: () => Navigator.of(dialogContext).pop(),
         onSubmit: () {
-          Navigator.of(context).pop();
-          deletePlaylistFolder(widget.folderId, context);
-          Navigator.of(context).pop(); // Go back to library
+          Navigator.of(dialogContext).pop();
+          deletePlaylistFolder(widget.folderId, pageContext);
+          if (!pageContext.mounted) return;
+
+          // Prefer popping back to the previous library page; fall back to
+          // replacing the stack so we never pop the last shell route.
+          if (pageContext.canPop()) {
+            pageContext.pop();
+          } else {
+            pageContext.go(NavigationManager.libraryPath);
+          }
         },
       ),
     );

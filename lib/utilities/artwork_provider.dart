@@ -29,23 +29,24 @@ import 'package:flutter/widgets.dart';
 class ArtworkProvider {
   ArtworkProvider._();
 
+  // Cache by a short key so large base64 payloads aren't Map keys.
   static final Map<String, ImageProvider> _cache = {};
 
   static ImageProvider get(String artwork) {
     if (artwork.isEmpty) throw ArgumentError('artwork must not be empty');
 
-    final cached = _cache[artwork];
+    final cacheKey = _cacheKey(artwork);
+    final cached = _cache[cacheKey];
     if (cached != null) return cached;
 
     late ImageProvider provider;
     try {
       if (artwork.startsWith('http')) {
         provider = CachedNetworkImageProvider(artwork);
-      } else if (artwork.startsWith('data:image')) {
-        final commaIdx = artwork.indexOf(',');
-        if (commaIdx == -1) throw Exception('invalid base64 image');
-        final bytes = base64Decode(artwork.substring(commaIdx + 1));
-        provider = MemoryImage(bytes);
+      } else if (artwork.startsWith('data:')) {
+        provider = MemoryImage(_decodeDataUri(artwork));
+      } else if (_looksLikeRawBase64(artwork)) {
+        provider = MemoryImage(base64Decode(artwork));
       } else if (!kIsWeb &&
           (artwork.startsWith('file://') || artwork.startsWith('/'))) {
         final path = artwork.replaceFirst('file://', '');
@@ -57,8 +58,30 @@ class ArtworkProvider {
       provider = const AssetImage('assets/placeholder.png');
     }
 
-    _cache[artwork] = provider;
+    _cache[cacheKey] = provider;
     return provider;
+  }
+
+  static String _cacheKey(String artwork) {
+    if (artwork.length <= 128) return artwork;
+    return '${artwork.length}:${artwork.hashCode}:'
+        '${artwork.substring(0, 32)}:${artwork.substring(artwork.length - 32)}';
+  }
+
+  static Uint8List _decodeDataUri(String artwork) {
+    final commaIdx = artwork.indexOf(',');
+    if (commaIdx == -1) {
+      throw Exception('invalid data URI image');
+    }
+    return base64Decode(artwork.substring(commaIdx + 1));
+  }
+
+  static bool _looksLikeRawBase64(String value) {
+    if (value.length < 64) return false;
+    if (value.contains('/') || value.contains('.') || value.contains(':')) {
+      return false;
+    }
+    return RegExp(r'^[A-Za-z0-9+/=\s]+$').hasMatch(value);
   }
 
   static void clearCache() => _cache.clear();

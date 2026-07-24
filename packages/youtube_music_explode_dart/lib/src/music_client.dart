@@ -33,6 +33,22 @@ class MusicAlbum {
   String toString() => 'MusicAlbum($id, $title)';
 }
 
+/// A snapshot of YouTube Music charts used by Search discovery.
+class MusicCharts {
+  const MusicCharts({
+    required this.artists,
+    required this.trendingQueries,
+  });
+
+  /// Chart artists (Top Artists).
+  final List<MusicArtist> artists;
+
+  /// Trending search terms derived from chart / explore content.
+  final List<String> trendingQueries;
+
+  bool get isEmpty => artists.isEmpty && trendingQueries.isEmpty;
+}
+
 /// Queries the YouTube Music (`WEB_REMIX`) browse endpoints.
 class MusicClient {
   /// Initializes an instance of [MusicClient].
@@ -94,6 +110,252 @@ class MusicClient {
       );
     }
     return results;
+  }
+
+  /// Fetches current YouTube Music charts for discovery:
+  /// top artists + trending search terms (from regional Trending playlist).
+  ///
+  /// [country] is an ISO 3166-1 alpha-2 code (e.g. `PH`, `US`); `ZZ` = global.
+  Future<MusicCharts> getCharts({String country = 'ZZ'}) async {
+    final normalizedCountry = country.trim().toUpperCase();
+    final chartsContext = <String, dynamic>{
+      'client': {
+        'clientName': 'WEB_REMIX',
+        'clientVersion': '1.20240101.01.00',
+        'hl': 'en',
+        if (normalizedCountry != 'ZZ') 'gl': normalizedCountry,
+      },
+    };
+
+    final artists = <MusicArtist>[];
+    final seenArtistIds = <String>{};
+    final trendingPlaylistIds = <String>[];
+    final seenPlaylistIds = <String>{};
+
+    void collectArtistsAndPlaylists(_JsonMap root) {
+      for (final item in _findRenderers(root, 'musicTwoRowItemRenderer')) {
+        final title = item
+            .getMap('title')
+            ?.getList('runs')
+            ?.whereType<Map>()
+            .parseRuns()
+            .trim();
+        final browseId = item
+            .getMap('navigationEndpoint')
+            ?.getMap('browseEndpoint')
+            ?.getValue<String>('browseId');
+        if (browseId == null || browseId.isEmpty) continue;
+
+        // Chart video / trending playlists (not artist tiles).
+        if (browseId.startsWith('VL') || browseId.startsWith('PL')) {
+          final lower = (title ?? '').toLowerCase();
+          final isTrendingShelf = lower.contains('trending') ||
+              lower.contains('daily top') ||
+              lower.contains('top 100');
+          if (isTrendingShelf && seenPlaylistIds.add(browseId)) {
+            // Prefer "Trending …" first.
+            if (lower.contains('trending')) {
+              trendingPlaylistIds.insert(0, browseId);
+            } else {
+              trendingPlaylistIds.add(browseId);
+            }
+          }
+          continue;
+        }
+
+        if (!browseId.startsWith('UC') || !seenArtistIds.add(browseId)) {
+          continue;
+        }
+
+        final pageType = item
+            .getMap('navigationEndpoint')
+            ?.getMap('browseEndpoint')
+            ?.getMap('browseEndpointContextSupportedConfigs')
+            ?.getMap('browseEndpointContextMusicConfig')
+            ?.getValue<String>('pageType');
+        if (pageType != null && pageType != _artistPageType) continue;
+
+        if (title == null || title.isEmpty) continue;
+        artists.add(
+          MusicArtist(
+            id: browseId,
+            name: title,
+            thumbnailUrl: _twoRowThumbnailUrl(item),
+          ),
+        );
+      }
+
+      for (final item in _findRenderers(
+        root,
+        'musicResponsiveListItemRenderer',
+      )) {
+        final browseId = item
+                .getMap('navigationEndpoint')
+                ?.getMap('browseEndpoint')
+                ?.getValue<String>('browseId') ??
+            _artistBrowseIdFromRuns(item);
+        if (browseId == null ||
+            !browseId.startsWith('UC') ||
+            !seenArtistIds.add(browseId)) {
+          continue;
+        }
+
+        final name = _firstFlexColumnText(item)?.trim();
+        if (name == null || name.isEmpty) continue;
+
+        artists.add(
+          MusicArtist(
+            id: browseId,
+            name: name,
+            thumbnailUrl: _listItemThumbnailUrl(item),
+          ),
+        );
+      }
+    }
+
+    _JsonMap chartsRoot;
+    try {
+      chartsRoot = await _httpClient.sendMusicPost('browse', {
+        'context': chartsContext,
+        'browseId': 'FEmusic_charts',
+        'formData': {
+          'selectedValues': [normalizedCountry],
+        },
+      });
+      collectArtistsAndPlaylists(chartsRoot);
+    } catch (_) {
+      chartsRoot = {};
+    }
+
+    // If country selection did not stick (often returns Global/India artists),
+    // do not silently accept the wrong region.
+    final selectedCountry = _chartsSelectedCountry(chartsRoot);
+    final countryLooksWrong = normalizedCountry != 'ZZ' &&
+        selectedCountry != null &&
+        !selectedCountry.toUpperCase().contains(normalizedCountry) &&
+        !_countryNameMatchesCode(selectedCountry, normalizedCountry);
+
+    if (countryLooksWrong) {
+      artists.clear();
+      seenArtistIds.clear();
+      trendingPlaylistIds.clear();
+      seenPlaylistIds.clear();
+    }
+
+    final queries = <String>[];
+    final seenQueries = <String>{};
+
+    for (final playlistId in trendingPlaylistIds.take(2)) {
+      if (queries.length >= 6) break;
+      try {
+        final playlistRoot = await _httpClient.sendMusicPost('browse', {
+          'context': chartsContext,
+          'browseId': playlistId,
+        });
+        for (final item in _findRenderers(
+          playlistRoot,
+          'musicResponsiveListItemRenderer',
+        )) {
+          final rawTitle = _firstFlexColumnText(item)?.trim();
+          final query = _normalizeTrendingQuery(rawTitle);
+          if (query == null) continue;
+          if (!seenQueries.add(query.toLowerCase())) continue;
+          queries.add(query);
+          if (queries.length >= 6) break;
+        }
+      } catch (_) {
+        // Try next playlist.
+      }
+    }
+
+    return MusicCharts(
+      artists: artists.take(12).toList(growable: false),
+      trendingQueries: queries.take(6).toList(growable: false),
+    );
+  }
+
+  String? _artistBrowseIdFromRuns(_JsonMap item) {
+    final columns = item.getList('flexColumns');
+    if (columns == null) return null;
+    for (final column in columns) {
+      if (column is! Map) continue;
+      final runs = column
+          .cast<String, dynamic>()
+          .getMap('musicResponsiveListItemFlexColumnRenderer')
+          ?.getMap('text')
+          ?.getList('runs')
+          ?.whereType<Map>();
+      if (runs == null) continue;
+      for (final run in runs) {
+        final browseId = run['navigationEndpoint'] is Map
+            ? (run['navigationEndpoint'] as Map)['browseEndpoint'] is Map
+                ? ((run['navigationEndpoint'] as Map)['browseEndpoint']
+                        as Map)['browseId']
+                    ?.toString()
+                : null
+            : null;
+        if (browseId != null && browseId.startsWith('UC')) return browseId;
+      }
+    }
+    return null;
+  }
+
+  String? _chartsSelectedCountry(_JsonMap root) {
+    for (final button in _findRenderers(
+      root,
+      'musicSortFilterButtonRenderer',
+    )) {
+      final text = button
+          .getMap('title')
+          ?.getList('runs')
+          ?.whereType<Map>()
+          .parseRuns()
+          .trim();
+      if (text != null && text.isNotEmpty) return text;
+    }
+    return null;
+  }
+
+  bool _countryNameMatchesCode(String selectedName, String code) {
+    const names = <String, String>{
+      'PH': 'philippines',
+      'IN': 'india',
+      'US': 'united states',
+      'GB': 'united kingdom',
+      'ZZ': 'global',
+    };
+    final expected = names[code];
+    if (expected == null) return false;
+    return selectedName.toLowerCase().contains(expected);
+  }
+
+  String? _normalizeTrendingQuery(String? raw) {
+    if (raw == null) return null;
+    var text = raw.trim();
+    if (text.length < 2) return null;
+
+    text = text
+        .replaceAll(
+          RegExp(
+            r'\s*[\(\[][^\)\]]*(official|music video|lyric|audio|video|mv|hd|4k|clean ver\.?)[^\)\]]*[\)\]]',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    // Drop long mashup / compilation spam.
+    if (text.length > 64) return null;
+    final lower = text.toLowerCase();
+    if (lower.contains('mashup') ||
+        lower.contains('tiktok') ||
+        lower.contains('nonstop') ||
+        lower.contains('subscriber') ||
+        lower.contains('views')) {
+      return null;
+    }
+    return text.isEmpty ? null : text;
   }
 
   /// Returns the full discography (albums, singles and EPs) of a YouTube Music

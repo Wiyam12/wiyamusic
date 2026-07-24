@@ -358,6 +358,14 @@ Future<void> _toggleOffline(
   MediaItem metadata,
 ) async {
   final originalValue = status.value;
+
+  if (!originalValue &&
+      audioId != null &&
+      audioId.isNotEmpty &&
+      isSongDownloading(audioId)) {
+    return;
+  }
+
   status.value = !originalValue;
 
   try {
@@ -365,11 +373,17 @@ Future<void> _toggleOffline(
     if (originalValue) {
       success = await removeSongFromOffline(audioId);
     } else {
-      success = await makeSongOffline(mediaItemToMap(metadata));
+      success = await makeSongOffline(
+        mediaItemToMap(metadata),
+        cancelExisting: false,
+      );
     }
     if (!success) {
       status.value = originalValue;
     }
+  } on SongOfflineRateLimited {
+    status.value = originalValue;
+    logger.log('Offline download rate limited for $audioId');
   } catch (e) {
     status.value = originalValue;
     logger.log('Error toggling offline status', error: e);

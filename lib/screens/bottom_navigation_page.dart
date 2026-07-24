@@ -31,6 +31,7 @@ import 'package:wiyamusic/constants/app_constants.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/theme/design_tokens.dart';
 import 'package:wiyamusic/utilities/flutter_bottom_sheet.dart'
     show closeCurrentBottomSheet;
 import 'package:wiyamusic/utilities/flutter_toast.dart';
@@ -110,6 +111,9 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
               final items = _getNavigationItems(isOfflineMode);
 
               return Scaffold(
+                // Keep the floating nav / mini player pinned to the screen
+                // bottom when the keyboard opens (instead of lifting with it).
+                resizeToAvoidBottomInset: false,
                 body: SafeArea(
                   bottom: false,
                   child: Row(
@@ -144,6 +148,12 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                               isMiniPlayerVisible: isMiniPlayerVisible,
                             );
 
+                            // Nav chrome ignores keyboard insets so it stays
+                            // floating at the physical bottom of the screen.
+                            final chromeMediaQuery = mediaQuery.copyWith(
+                              viewInsets: EdgeInsets.zero,
+                            );
+
                             return Stack(
                               children: [
                                 MediaQuery(
@@ -159,19 +169,23 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                                     left: 8,
                                     right: 8,
                                     bottom: isLargeScreen
-                                        ? 8 + safeBottom
-                                        : _floatingNavOccupiedHeight(
-                                                safeBottom,
-                                              ) +
+                                        ? safeBottom
+                                        : _floatingNavOccupiedHeight(8) +
                                               floatingNavMiniPlayerGap,
-                                    child: const MiniPlayer(),
+                                    child: MediaQuery(
+                                      data: chromeMediaQuery,
+                                      child: const MiniPlayer(),
+                                    ),
                                   ),
                                 if (!isLargeScreen)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 6),
-                                    child: _buildFloatingNavBar(
-                                      items: items,
-                                      isOfflineMode: isOfflineMode,
+                                  MediaQuery(
+                                    data: chromeMediaQuery,
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(bottom: 6),
+                                      child: _buildFloatingNavBar(
+                                        items: items,
+                                        isOfflineMode: isOfflineMode,
+                                      ),
                                     ),
                                   ),
                               ],
@@ -227,10 +241,12 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
       items: items
           .map((item) => SimpleNavBarItem(label: item.label, icon: item.icon))
           .toList(),
-      backgroundColor: colorScheme.surfaceContainerHigh,
+      backgroundColor: colorScheme.surfaceContainerHigh.withValues(alpha: 0.82),
       selectedColor: colorScheme.primary,
       unselectedColor: colorScheme.onSurfaceVariant,
-      discColor: colorScheme.primaryContainer,
+      discColor:
+          Color.lerp(colorScheme.primary, WiyaDesign.primaryDeep, 0.35) ??
+          colorScheme.primary,
       isFloating: true,
       animationType: SimpleNavAnimType.float,
       textMode: onlyShowSelectedLabels

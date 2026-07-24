@@ -36,7 +36,8 @@ Future<T> retry<T>(
 /// Get "retry" cost of each YoutubeExplode exception.
 int getExceptionCost(Exception e) {
   if (e is RequestLimitExceededException) {
-    return 2;
+    // Do not retry rate limits — retries make YouTube throttle harder.
+    return 5;
   }
   if (e is FatalFailureException) {
     return 3;

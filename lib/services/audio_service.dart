@@ -1752,6 +1752,25 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     await super.stop();
   }
 
+  /// Stops playback and clears the current media so the mini player hides.
+  Future<void> dismissPlayer() async {
+    try {
+      await stop();
+      _queueList.clear();
+      _originalQueueList.clear();
+      _currentQueueIndex = 0;
+      _currentLoadingIndex = -1;
+      _currentLoadingTransitionId = -1;
+      _resetPreloadingState();
+      queue.add([]);
+      _queueMapStream.add(const []);
+      mediaItem.add(null);
+      _updatePlaybackState();
+    } catch (e, stackTrace) {
+      logger.log('Error in dismissPlayer()', error: e, stackTrace: stackTrace);
+    }
+  }
+
   /// Returns unplayed manually added songs after the current queue index.
   List<Map> _getUnplayedManualSongs() {
     return _queueList

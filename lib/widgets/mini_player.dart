@@ -19,18 +19,22 @@
  *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/models/full_player_state.dart';
 import 'package:wiyamusic/models/position_data.dart';
 import 'package:wiyamusic/screens/now_playing_page.dart';
+import 'package:wiyamusic/theme/design_tokens.dart';
 import 'package:wiyamusic/widgets/marquee.dart';
 import 'package:wiyamusic/widgets/song_artwork.dart';
-import 'package:rxdart/rxdart.dart';
 
 final Stream<FullPlayerState> _fullPlayerStateStream =
     Rx.combineLatest3(
@@ -51,9 +55,9 @@ class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 
   static const double playerHeight = 72;
-  static const double _borderRadius = 20;
+  static const double _borderRadius = WiyaDesign.cornerRadius;
   static const double _artworkSize = 52;
-  static const double _artworkRadius = 14;
+  static const double _artworkRadius = WiyaDesign.cornerRadiusSmall;
 
   @override
   Widget build(BuildContext context) {
@@ -111,25 +115,47 @@ class _MiniPlayerBody extends StatefulWidget {
 }
 
 class _MiniPlayerBodyState extends State<_MiniPlayerBody>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _animationController;
+    with TickerProviderStateMixin {
+  late final AnimationController _pressController;
+  late final AnimationController _glowController;
   late final Animation<double> _scaleAnimation;
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
+    _pressController = AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: this,
     );
     _scaleAnimation = Tween<double>(begin: 1, end: 0.98).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+      CurvedAnimation(parent: _pressController, curve: Curves.easeInOut),
     );
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    );
+    if (widget.state.playbackState.playing) {
+      _glowController.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _MiniPlayerBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final isPlaying = widget.state.playbackState.playing;
+    final wasPlaying = oldWidget.state.playbackState.playing;
+    if (isPlaying == wasPlaying) return;
+    if (isPlaying) {
+      _glowController.repeat();
+    } else {
+      _glowController.stop();
+    }
   }
 
   @override
   void dispose() {
-    _animationController.dispose();
+    _pressController.dispose();
+    _glowController.dispose();
     super.dispose();
   }
 
@@ -174,77 +200,240 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                   totalDuration.inMilliseconds)
               .clamp(0.0, 1.0);
 
-    return AnimatedBuilder(
-      animation: _scaleAnimation,
-      builder: (context, child) {
-        return Transform.scale(
-          scale: _scaleAnimation.value,
-          child: GestureDetector(
-            onTapDown: (_) => _animationController.forward(),
-            onTapUp: (_) => _animationController.reverse(),
-            onTapCancel: () => _animationController.reverse(),
-            onVerticalDragUpdate: _handleVerticalDrag,
-            onTap: _navigateToNowPlaying,
-            child: Container(
-              height: MiniPlayer.playerHeight,
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(MiniPlayer._borderRadius),
-                boxShadow: [
-                  BoxShadow(
-                    color: colorScheme.shadow.withValues(alpha: 0.08),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(MiniPlayer._borderRadius),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Row(
-                    children: [
-                      _ArtworkWidget(metadata: metadata),
-                      Expanded(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          switchInCurve: Curves.easeIn,
-                          switchOutCurve: Curves.easeOut,
-                          layoutBuilder: (currentChild, previousChildren) =>
-                              Stack(
-                                alignment: Alignment.centerLeft,
-                                children: [
-                                  ...previousChildren,
-                                  if (currentChild != null) currentChild,
-                                ],
+    return Dismissible(
+      key: ValueKey('mini-player-${metadata.id}'),
+      dismissThresholds: const {
+        DismissDirection.startToEnd: 0.35,
+        DismissDirection.endToStart: 0.35,
+      },
+      onDismissed: (_) {
+        unawaited(audioHandler.dismissPlayer());
+      },
+      child: AnimatedBuilder(
+        animation: _scaleAnimation,
+        builder: (context, child) {
+          return Transform.scale(scale: _scaleAnimation.value, child: child);
+        },
+        child: GestureDetector(
+          onTapDown: (_) => _pressController.forward(),
+          onTapUp: (_) => _pressController.reverse(),
+          onTapCancel: () => _pressController.reverse(),
+          onVerticalDragUpdate: _handleVerticalDrag,
+          onTap: _navigateToNowPlaying,
+          child: SizedBox(
+            height: MiniPlayer.playerHeight,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(MiniPlayer._borderRadius),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(
+                      sigmaX: WiyaDesign.blurSigma * 0.45,
+                      sigmaY: WiyaDesign.blurSigma * 0.45,
+                    ),
+                    child: Container(
+                      decoration: WiyaDesign.glassSurface(
+                        colorScheme: colorScheme,
+                        fillOpacity: 0.62,
+                        withGlow: true,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(
+                        children: [
+                          _ArtworkWidget(metadata: metadata),
+                          Expanded(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 300),
+                              switchInCurve: Curves.easeIn,
+                              switchOutCurve: Curves.easeOut,
+                              layoutBuilder: (currentChild, previousChildren) =>
+                                  Stack(
+                                    alignment: Alignment.centerLeft,
+                                    children: [
+                                      ...previousChildren,
+                                      if (currentChild != null) currentChild,
+                                    ],
+                                  ),
+                              transitionBuilder: (child, animation) =>
+                                  FadeTransition(
+                                    opacity: animation,
+                                    child: child,
+                                  ),
+                              child: KeyedSubtree(
+                                key: ValueKey(metadata.id),
+                                child: _MetadataWidget(
+                                  title: metadata.title,
+                                  artist: metadata.artist,
+                                  colorScheme: colorScheme,
+                                ),
                               ),
-                          transitionBuilder: (child, animation) =>
-                              FadeTransition(opacity: animation, child: child),
-                          child: KeyedSubtree(
-                            key: ValueKey(metadata.id),
-                            child: _MetadataWidget(
-                              title: metadata.title,
-                              artist: metadata.artist,
-                              colorScheme: colorScheme,
                             ),
                           ),
-                        ),
+                          _ControlsWidget(
+                            colorScheme: colorScheme,
+                            playbackState: state.playbackState,
+                            hasNext: widget.hasNext,
+                            progress: progress,
+                          ),
+                        ],
                       ),
-                      _ControlsWidget(
-                        colorScheme: colorScheme,
-                        playbackState: state.playbackState,
-                        hasNext: widget.hasNext,
-                        progress: progress,
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
+                if (state.playbackState.playing)
+                  IgnorePointer(
+                    child: RepaintBoundary(
+                      child: AnimatedBuilder(
+                        animation: _glowController,
+                        builder: (context, _) {
+                          return CustomPaint(
+                            painter: _MiniPlayerGlowBorderPainter(
+                              progress: _glowController.value,
+                              borderRadius: MiniPlayer._borderRadius,
+                              color: WiyaDesign.primary,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
+  }
+}
+
+/// Soft neon trail that travels along the Mini Player's rounded border path.
+class _MiniPlayerGlowBorderPainter extends CustomPainter {
+  _MiniPlayerGlowBorderPainter({
+    required this.progress,
+    required this.borderRadius,
+    required this.color,
+  });
+
+  final double progress;
+  final double borderRadius;
+  final Color color;
+
+  static const double _strokeInset = 1.25;
+  static const double _trailFraction = 0.26;
+  static const int _trailSteps = 28;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+
+    final rrect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        _strokeInset,
+        _strokeInset,
+        size.width - _strokeInset * 2,
+        size.height - _strokeInset * 2,
+      ),
+      Radius.circular(math.max(0, borderRadius - _strokeInset)),
+    );
+    final path = Path()..addRRect(rrect);
+    // PathMetrics is single-pass — do not call isEmpty before first.
+    final metrics = path.computeMetrics().toList();
+    if (metrics.isEmpty) return;
+    final metric = metrics.first;
+    final length = metric.length;
+    if (length <= 0) return;
+
+    // Quiet base rim so the shape reads even between glow peaks.
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = color.withValues(alpha: 0.14),
+    );
+
+    final head = progress * length;
+    final trailLength = length * _trailFraction;
+
+    for (var i = 0; i < _trailSteps; i++) {
+      final t = i / (_trailSteps - 1); // 0 = tail, 1 = head
+      final eased = Curves.easeIn.transform(t);
+      final start = (head - trailLength * (1 - t) + length * 4) % length;
+      final end =
+          (head - trailLength * (1 - (i + 1) / _trailSteps) + length * 4) %
+          length;
+
+      final segment = _extractWrappedPath(metric, length, start, end);
+      if (segment == null) continue;
+
+      final alpha = 0.08 + eased * 0.72;
+      final strokeWidth = 1.1 + eased * 1.8;
+
+      canvas.drawPath(
+        segment,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..color = color.withValues(alpha: alpha),
+      );
+    }
+
+    // Soft bloom near the leading edge only (one blur pass).
+    final bloomStart = (head - length * 0.5 + length) % length;
+    final bloomEnd = (head + length * 0.001) % length;
+    final bloomPath = _extractWrappedPath(metric, length, bloomStart, bloomEnd);
+    if (bloomPath != null) {
+      canvas.drawPath(
+        bloomPath,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 5
+          ..strokeCap = StrokeCap.round
+          ..color = color.withValues(alpha: 0.28)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+      );
+      canvas.drawPath(
+        bloomPath,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2
+          ..strokeCap = StrokeCap.round
+          ..color = color.withValues(alpha: 0.95),
+      );
+    }
+  }
+
+  Path? _extractWrappedPath(
+    PathMetric metric,
+    double length,
+    double start,
+    double end,
+  ) {
+    start = start % length;
+    end = end % length;
+    if ((end - start).abs() < 0.4 && start > end) {
+      // Degenerate tiny wrap; skip.
+      return null;
+    }
+
+    if (end >= start) {
+      return metric.extractPath(start, end);
+    }
+
+    // Segment wraps past the path origin.
+    return Path()
+      ..addPath(metric.extractPath(start, length), Offset.zero)
+      ..addPath(metric.extractPath(0, end), Offset.zero);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MiniPlayerGlowBorderPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.borderRadius != borderRadius ||
+        oldDelegate.color != color;
   }
 }
 
@@ -261,13 +450,11 @@ class _ArtworkWidget extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(MiniPlayer._artworkRadius),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            boxShadow: WiyaDesign.softGlow(
+              color: Theme.of(context).colorScheme.primary,
+              blur: 14,
+              opacity: 0.22,
+            ),
           ),
           child: SongArtworkWidget(
             metadata: metadata,
@@ -351,9 +538,18 @@ class _ControlsWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isPlaying = playbackState.playing;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (isPlaying) ...[
+          LoadingAnimationWidget.staggeredDotsWave(
+            color: colorScheme.primary,
+            size: 22,
+          ),
+          const SizedBox(width: 6),
+        ],
         _CircularPlayButton(
           colorScheme: colorScheme,
           playbackState: playbackState,

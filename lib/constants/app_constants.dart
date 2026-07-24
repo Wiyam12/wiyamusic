@@ -20,23 +20,26 @@
  */
 
 import 'package:flutter/material.dart';
+import 'package:wiyamusic/theme/design_tokens.dart';
 
 const recommendedCubesNumber = 8;
 
 const commonSingleChildScrollViewPadding = EdgeInsets.symmetric(horizontal: 10);
-var commonBarRadius = BorderRadius.circular(16);
+var commonBarRadius = BorderRadius.circular(WiyaDesign.cornerRadius);
 var commonBarTitleStyle = const TextStyle(
   fontSize: 15,
   fontWeight: FontWeight.bold,
 );
-const commonMiniArtworkRadius = 8.0;
+const commonMiniArtworkRadius = WiyaDesign.cornerRadiusSmall;
 
-const commonCustomBarRadius = BorderRadius.all(Radius.circular(16));
+const commonCustomBarRadius = BorderRadius.all(
+  Radius.circular(WiyaDesign.cornerRadius),
+);
 const commonCustomBarRadiusFirst = BorderRadius.vertical(
-  top: Radius.circular(16),
+  top: Radius.circular(WiyaDesign.cornerRadius),
 );
 const commonCustomBarRadiusLast = BorderRadius.vertical(
-  bottom: Radius.circular(16),
+  bottom: Radius.circular(WiyaDesign.cornerRadius),
 );
 
 const miniPlayerTotalHeight = 92.0;

@@ -322,6 +322,47 @@ class YoutubeHttpClient extends http.BaseClient {
     });
   }
 
+  /// Sends a call to the YouTube Music (`music.youtube.com`) API endpoint.
+  ///
+  /// Prefer this for WEB_REMIX browse/search so regional params (`gl`, charts
+  /// `formData`) are applied correctly.
+  Future<JsonMap> sendMusicPost(
+    String action,
+    Map<String, dynamic> data, {
+    Map<String, String>? headers,
+  }) {
+    assert(action == 'next' || action == 'browse' || action == 'search');
+
+    final url = Uri.parse(
+      'https://music.youtube.com/youtubei/v1/$action?prettyPrint=false',
+    );
+
+    final body = {
+      'context': const {
+        'client': {
+          'clientName': 'WEB_REMIX',
+          'clientVersion': '1.20240101.01.00',
+          'hl': 'en',
+        },
+      },
+      ...data,
+    };
+
+    final musicHeaders = <String, String>{
+      'content-type': 'application/json',
+      'origin': 'https://music.youtube.com',
+      'referer': 'https://music.youtube.com/',
+      ...?headers,
+    };
+
+    return retry<JsonMap>(this, () async {
+      final raw =
+          await post(url, body: json.encode(body), headers: musicHeaders);
+      if (_closed) throw HttpClientClosedException();
+      return json.decode(raw.body);
+    });
+  }
+
   Stream<List<int>> _getHlsStream(HlsStreamInfo stream) async* {
     final videoIndex = await getString(stream.url);
     final video = HlsManifest.parseVideoSegments(videoIndex);

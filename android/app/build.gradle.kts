@@ -49,28 +49,16 @@ android {
         versionName = flutter.versionName
     }
 
-    flavorDimensions += "flavor"
-
-    productFlavors {
-        create("github") {
-            dimension = "flavor"
-            applicationIdSuffix = ""
-        }
-        create("fdroid") {
-            dimension = "flavor"
-            applicationIdSuffix = ".fdroid"
-        }
-    }
-
     signingConfigs {
         create("release") {
-            // From decoded key
-            storeFile = file("key.jks")
-
-            // From key.properties
-            keyAlias = keystoreProperties["keyAlias"] as String?
-            keyPassword = keystoreProperties["keyPassword"] as String?
-            storePassword = keystoreProperties["storePassword"] as String?
+            val storePath = keystoreProperties["storeFile"] as String? ?: "key.jks"
+            val releaseStoreFile = file(storePath)
+            if (releaseStoreFile.exists()) {
+                storeFile = releaseStoreFile
+                keyAlias = keystoreProperties["keyAlias"] as String?
+                keyPassword = keystoreProperties["keyPassword"] as String?
+                storePassword = keystoreProperties["storePassword"] as String?
+            }
         }
     }
 
@@ -87,7 +75,14 @@ android {
 
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            val releaseStoreFile =
+                signingConfigs.getByName("release").storeFile
+            signingConfig = if (releaseStoreFile != null && releaseStoreFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                // Local --release without key.jks: use debug signing.
+                signingConfigs.getByName("debug")
+            }
             isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

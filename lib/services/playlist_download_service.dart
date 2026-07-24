@@ -135,7 +135,8 @@ class OfflinePlaylistService {
 
     try {
       final songQueue = Queue<dynamic>.from(songsList);
-      const maxConcurrent = 3;
+      // Keep playlist song downloads sequential to avoid YouTube rate limits.
+      const maxConcurrent = 1;
       final workerCount = songsList.length < maxConcurrent
           ? songsList.length
           : maxConcurrent;
@@ -516,13 +517,24 @@ class OfflinePlaylistService {
           progressNotifier.value.completed++;
           progressNotifier.notifyListeners();
         } else {
-          final success = await makeSongOffline(song);
-          if (success) {
-            progressNotifier.value.completed++;
-          } else {
+          try {
+            final success = await makeSongOffline(
+              song,
+              cancelExisting: false,
+            );
+            if (success) {
+              progressNotifier.value.completed++;
+            } else {
+              progressNotifier.value.failed++;
+            }
+          } on SongOfflineRateLimited {
             progressNotifier.value.failed++;
+            // Back off hard when YouTube rate-limits playlist downloads.
+            await Future<void>.delayed(const Duration(seconds: 8));
           }
           progressNotifier.notifyListeners();
+          // Brief pause between songs to reduce YouTube rate limiting.
+          await Future<void>.delayed(const Duration(milliseconds: 400));
         }
       } catch (e, stackTrace) {
         logger.log(

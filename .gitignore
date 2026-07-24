@@ -8,6 +8,11 @@
 .buildlog/
 .history
 .svn/
+.env
+
+# Environment / secrets
+.env.local
+.env.*.local
 
 # IntelliJ related
 *.iml

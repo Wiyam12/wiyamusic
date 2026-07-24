@@ -53,11 +53,15 @@ Future<String?> pickImage() async {
         case 'webp':
           mimeType = 'image/webp';
           break;
+        case 'heic':
+        case 'heif':
+          mimeType = 'image/heic';
+          break;
         default:
-          mimeType = 'application/octet-stream';
+          mimeType = 'image/jpeg';
       }
     } else {
-      mimeType = 'application/octet-stream';
+      mimeType = 'image/jpeg';
     }
 
     return 'data:$mimeType;base64,${base64Encode(file.bytes!)}';

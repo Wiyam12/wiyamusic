@@ -50,6 +50,7 @@ class PlaylistBar extends StatelessWidget {
     this.playlistData,
     this.onPressed,
     this.onDelete,
+    this.subtitle,
     this.cubeIcon = FluentIcons.text_bullet_list_24_filled,
     this.showBuildActions = true,
     this.isAlbum = false,
@@ -60,6 +61,7 @@ class PlaylistBar extends StatelessWidget {
   final String? playlistId;
   final String playlistTitle;
   final String? playlistArtwork;
+  final String? subtitle;
   final VoidCallback? onPressed;
   final VoidCallback? onDelete;
   final IconData cubeIcon;
@@ -151,6 +153,16 @@ class PlaylistBar extends StatelessWidget {
                     if (isFolder) ...[
                       const SizedBox(height: 3),
                       _buildFolderSubtitle(context) ?? const SizedBox.shrink(),
+                    ] else if (subtitle != null && subtitle!.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle!,
+                        style: TextStyle(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 13,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ],
                 ),
@@ -320,16 +332,18 @@ class PlaylistBar extends StatelessWidget {
   }
 
   Widget _buildPlaylistIcon(ColorScheme colorScheme) {
+    final rawArtwork =
+        playlistArtwork ?? playlistData?['image']?.toString();
     final artwork = isArtist
-        ? normalizeArtistThumbnailUrl(playlistArtwork)
-        : playlistArtwork;
+        ? normalizeArtistThumbnailUrl(rawArtwork)
+        : rawArtwork;
     if (artwork != null && artwork.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(isArtist ? 26 : 12),
         child: Image(
           image: ArtworkProvider.get(artwork),
-          width: 52,
-          height: 52,
+          width: PlaylistBar.artworkSize,
+          height: PlaylistBar.artworkSize,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => _buildIconFallback(colorScheme),
         ),
@@ -340,8 +354,8 @@ class PlaylistBar extends StatelessWidget {
 
   Widget _buildIconFallback(ColorScheme colorScheme) {
     return Container(
-      width: 52,
-      height: 52,
+      width: PlaylistBar.artworkSize,
+      height: PlaylistBar.artworkSize,
       decoration: BoxDecoration(
         color: colorScheme.secondaryContainer,
         shape: isArtist ? BoxShape.circle : BoxShape.rectangle,
@@ -488,8 +502,8 @@ class PlaylistBar extends StatelessWidget {
   // Helper methods for folder display
   Widget _buildFolderIcon(ColorScheme colorScheme) {
     return Container(
-      width: 52,
-      height: 52,
+      width: PlaylistBar.artworkSize,
+      height: PlaylistBar.artworkSize,
       decoration: BoxDecoration(
         color: colorScheme.secondaryContainer,
         borderRadius: BorderRadius.circular(12),
@@ -524,8 +538,9 @@ class PlaylistBar extends StatelessWidget {
   ) {
     if (isFolder && playlistData != null) {
       return () {
+        final basePath = _routeBasePath(context);
         context.push(
-          '/home/folder/${playlistData!['id']}/${Uri.encodeComponent(playlistTitle)}',
+          '$basePath/folder/${playlistData!['id']}/${Uri.encodeComponent(playlistTitle)}',
         );
       };
     }

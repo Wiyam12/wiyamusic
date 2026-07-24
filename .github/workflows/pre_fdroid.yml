@@ -49,13 +49,13 @@ jobs:
       # Statically analyze the Dart code for any errors.
       - run: flutter analyze .
       # Build universal apk.
-      - run: flutter build apk --release --flavor fdroid -t lib/main_fdroid.dart
+      - run: flutter build apk --release -t lib/main_fdroid.dart
       # Release universal Fdroid pre-release apk.
       - uses: svenstaro/upload-release-action@v2
         with:
           repo_name: Wiyam12/wiyamusic
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: build/app/outputs/flutter-apk/app-fdroid-release.apk
+          file: build/app/outputs/flutter-apk/app-release.apk
           asset_name: WiyaMusic_fdroid.apk
           tag: ${{ github.ref }}
           prerelease: true

@@ -105,6 +105,14 @@ Future<StreamManifest?> _fetchStreamManifest(String songId) async {
     try {
       final manifest = await _fetchStreamManifestForClient(songId, client);
       if (manifest != null) return manifest;
+    } on RequestLimitExceededException catch (e) {
+      // Rate limiting applies to the IP — trying more clients makes it worse.
+      lastError = e;
+      logger.log(
+        'Rate limited fetching manifest for $songId — stopping client cascade',
+        error: e,
+      );
+      break;
     } catch (e) {
       lastError = e;
       logger.log(
@@ -170,6 +178,12 @@ Future<ResolvedSongStream?> _resolveFreshSongStream(String songId) async {
         '${client.payload['context']?['client']?['clientName']} '
         'failed CDN check for $songId',
       );
+    } on RequestLimitExceededException catch (e) {
+      logger.log(
+        'Rate limited resolving stream for $songId — stopping client cascade',
+        error: e,
+      );
+      break;
     } catch (e) {
       logger.log(
         'Stream resolve failed for $songId '
@@ -586,6 +600,55 @@ Future<void> removeRadioStationFromLiked(String radioStationId) async {
 bool isSongAlreadyOffline(songIdToCheck) =>
     userOfflineSongs.value.any((song) => song['ytid'] == songIdToCheck);
 
+/// Per-song download progress (`null` = idle, `0.0`–`1.0` = downloading).
+final Map<String, ValueNotifier<double?>> songDownloadProgressNotifiers = {};
+
+/// In-flight offline downloads (claimed synchronously before any await).
+final Set<String> _activeSongDownloads = {};
+
+class _SongDownloadSession {
+  bool cancelled = false;
+}
+
+final Map<String, _SongDownloadSession> _songDownloadSessions = {};
+
+ValueNotifier<double?> songDownloadProgressNotifier(String ytid) {
+  return songDownloadProgressNotifiers.putIfAbsent(
+    ytid,
+    () => ValueNotifier<double?>(null),
+  );
+}
+
+bool isSongDownloading(String ytid) => _activeSongDownloads.contains(ytid);
+
+void _setSongDownloadProgress(String ytid, double? progress) {
+  songDownloadProgressNotifier(ytid).value = progress;
+}
+
+void _clearSongDownloadProgress(String ytid) {
+  final notifier = songDownloadProgressNotifiers[ytid];
+  if (notifier == null) return;
+  notifier.value = null;
+}
+
+/// Cancels an in-progress single-song offline download, if any.
+void cancelSongDownload(String ytid) {
+  final session = _songDownloadSessions[ytid];
+  if (session != null) {
+    session.cancelled = true;
+  }
+}
+
+class SongOfflineDownloadCancelled implements Exception {
+  @override
+  String toString() => 'Song offline download cancelled';
+}
+
+class SongOfflineRateLimited implements Exception {
+  @override
+  String toString() => 'Song offline download rate limited by YouTube';
+}
+
 bool isPlaylistFullyOffline(List songs) {
   if (songs.isEmpty) return false;
   final offlineIds = userOfflineSongs.value.map((s) => s['ytid']).toSet();
@@ -830,9 +893,15 @@ Future<String?> getSongLyrics(String? artist, String title) async {
   return lyrics.value;
 }
 
-Future<bool> makeSongOffline(dynamic song) async {
+Future<bool> makeSongOffline(
+  dynamic song, {
+  void Function(double progress)? onProgress,
+  bool cancelExisting = true,
+}) async {
+  String? ytid;
+  _SongDownloadSession? session;
   try {
-    final String? ytid = song['ytid'];
+    ytid = song['ytid']?.toString();
 
     if (ytid == null || ytid.isEmpty) {
       logger.log('makeSongOffline: song["ytid"] is null or empty');
@@ -842,9 +911,37 @@ Future<bool> makeSongOffline(dynamic song) async {
     if (isSongAlreadyOffline(ytid)) {
       final existingPath = FilePaths.getAudioPath(ytid);
       if (await File(existingPath).exists()) {
+        onProgress?.call(1);
         return true;
       }
     }
+
+    // Cancel any previous in-flight download for this song, then claim the slot.
+    if (_activeSongDownloads.contains(ytid)) {
+      if (!cancelExisting) {
+        logger.log('makeSongOffline: download already in progress for $ytid');
+        return false;
+      }
+      cancelSongDownload(ytid);
+      // Wait briefly for the previous session to release the lock.
+      for (var i = 0; i < 40 && _activeSongDownloads.contains(ytid); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      if (_activeSongDownloads.contains(ytid)) {
+        logger.log('makeSongOffline: previous download did not stop for $ytid');
+        return false;
+      }
+    }
+
+    if (!_activeSongDownloads.add(ytid)) {
+      logger.log('makeSongOffline: failed to claim download lock for $ytid');
+      return false;
+    }
+
+    session = _SongDownloadSession();
+    _songDownloadSessions[ytid] = session;
+    _setSongDownloadProgress(ytid, 0);
+    onProgress?.call(0);
 
     final offlineSong = Map<String, dynamic>.from(song as Map);
 
@@ -856,18 +953,62 @@ Future<bool> makeSongOffline(dynamic song) async {
 
     IOSink? fileStream;
     try {
+      if (session.cancelled) throw SongOfflineDownloadCancelled();
+
       final audioManifest = await fetchBestAudioStream(ytid);
+      if (session.cancelled) throw SongOfflineDownloadCancelled();
+
       if (audioManifest == null) {
         logger.log('makeSongOffline: audioManifest is null for $ytid');
         return false;
       }
 
+      final totalBytes = audioManifest.size.totalBytes;
+      var downloadedBytes = 0;
+      void reportProgress() {
+        final progress = totalBytes > 0
+            ? (downloadedBytes / totalBytes).clamp(0.0, 1.0)
+            : (1 - (1_000_000 / (downloadedBytes + 1_000_000)))
+                .clamp(0.0, 0.95);
+        _setSongDownloadProgress(ytid!, progress);
+        onProgress?.call(progress);
+      }
+
       final stream = ytClient.videos.streamsClient.get(audioManifest);
       fileStream = audioFile.openWrite();
-      await stream.pipe(fileStream);
+      await for (final chunk in stream) {
+        if (session.cancelled) throw SongOfflineDownloadCancelled();
+        fileStream.add(chunk);
+        downloadedBytes += chunk.length;
+        reportProgress();
+      }
       await fileStream.flush();
       await fileStream.close();
       fileStream = null;
+      _setSongDownloadProgress(ytid, 1);
+      onProgress?.call(1);
+    } on SongOfflineDownloadCancelled {
+      try {
+        await fileStream?.close();
+      } catch (_) {}
+      if (await audioFile.exists()) {
+        await audioFile.delete();
+      }
+      logger.log('makeSongOffline: cancelled download for $ytid');
+      return false;
+    } on RequestLimitExceededException catch (e, stackTrace) {
+      logger.log(
+        'makeSongOffline: rate limited for $ytid',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      try {
+        await fileStream?.close();
+      } catch (_) {}
+      if (await audioFile.exists()) {
+        await audioFile.delete();
+      }
+      throw SongOfflineRateLimited();
     } catch (e, stackTrace) {
       logger.log(
         'Error downloading audio file',
@@ -877,6 +1018,13 @@ Future<bool> makeSongOffline(dynamic song) async {
       try {
         await fileStream?.close();
       } catch (_) {}
+      if (await audioFile.exists()) {
+        await audioFile.delete();
+      }
+      return false;
+    }
+
+    if (session.cancelled) {
       if (await audioFile.exists()) {
         await audioFile.delete();
       }
@@ -937,9 +1085,19 @@ Future<bool> makeSongOffline(dynamic song) async {
     }
 
     return true;
+  } on SongOfflineRateLimited {
+    rethrow;
   } catch (e, stackTrace) {
     logger.log('Error making song offline', error: e, stackTrace: stackTrace);
     return false;
+  } finally {
+    if (ytid != null &&
+        ytid.isNotEmpty &&
+        identical(_songDownloadSessions[ytid], session)) {
+      _songDownloadSessions.remove(ytid);
+      _activeSongDownloads.remove(ytid);
+      _clearSongDownloadProgress(ytid);
+    }
   }
 }
 

@@ -220,11 +220,12 @@ Future<String> addUserPlaylist(String input, BuildContext context) async {
 ) {
   final newPlaylistId = PlaylistUtils.generateCustomPlaylistId();
   final creationTime = DateTime.now().millisecondsSinceEpoch;
+  final trimmedImage = image?.trim();
   final customPlaylist = {
     'ytid': newPlaylistId,
     'title': playlistName,
     'source': 'user-created',
-    if (image != null) 'image': image,
+    if (trimmedImage != null && trimmedImage.isNotEmpty) 'image': trimmedImage,
     'list': [],
     'createdAt': creationTime,
   };
@@ -596,9 +597,15 @@ bool _removePlaylistFromLikedPlaylists(String playlistId) {
   return true;
 }
 
-String createPlaylistFolder(String folderName, [BuildContext? context]) {
+(String message, String? folderId) createPlaylistFolder(
+  String folderName, [
+  BuildContext? context,
+]) {
   if (folderName.trim().isEmpty) {
-    return context?.l10n?.enterFolderName ?? 'Please enter a folder name';
+    return (
+      context?.l10n?.enterFolderName ?? 'Please enter a folder name',
+      null,
+    );
   }
 
   final exists = userPlaylistFolders.value.any(
@@ -608,7 +615,10 @@ String createPlaylistFolder(String folderName, [BuildContext? context]) {
   );
 
   if (exists) {
-    return context?.l10n?.folderAlreadyExists ?? 'Folder already exists';
+    return (
+      context?.l10n?.folderAlreadyExists ?? 'Folder already exists',
+      null,
+    );
   }
 
   final newFolder = {
@@ -622,7 +632,10 @@ String createPlaylistFolder(String folderName, [BuildContext? context]) {
   unawaited(
     addOrUpdateData<List>('user', 'playlistFolders', userPlaylistFolders.value),
   );
-  return context?.l10n?.addedSuccess ?? 'Added successfully';
+  return (
+    context?.l10n?.addedSuccess ?? 'Added successfully',
+    newFolder['id'] as String,
+  );
 }
 
 String renamePlaylistFolder(

@@ -21,6 +21,7 @@
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:wiyamusic/theme/design_tokens.dart';
 
 class CustomSearchBar extends StatefulWidget {
   const CustomSearchBar({
@@ -51,16 +52,23 @@ class _CustomSearchBarState extends State<CustomSearchBar> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: SearchBar(
+        constraints: const BoxConstraints(
+          minHeight: 45, // ← your height
+          maxHeight: 52,
+        ),
         elevation: WidgetStateProperty.all(0),
         shadowColor: WidgetStateProperty.all(Colors.transparent),
         backgroundColor: WidgetStateProperty.all(
-          colorScheme.surfaceContainerHigh,
+          colorScheme.surfaceContainerHigh.withValues(alpha: 0.9),
         ),
         overlayColor: WidgetStateProperty.all(
           colorScheme.primary.withValues(alpha: 0.08),
         ),
         shape: WidgetStateProperty.all(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          RoundedRectangleBorder(borderRadius: WiyaDesign.borderRadius),
+        ),
+        side: WidgetStateProperty.all(
+          BorderSide(color: WiyaDesign.primaryBright.withValues(alpha: 0.2)),
         ),
         padding: WidgetStateProperty.all(
           const EdgeInsets.symmetric(horizontal: 16),
@@ -109,6 +117,7 @@ class _CustomSearchBarState extends State<CustomSearchBar> {
               onPressed: () {
                 widget.controller.clear();
                 widget.onChanged?.call('');
+                widget.focusNode.unfocus();
                 setState(() {});
               },
             ),

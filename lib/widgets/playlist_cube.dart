@@ -52,7 +52,7 @@ class PlaylistCube extends StatelessWidget {
       child: Stack(
         children: [
           PlaylistArtwork(
-            playlistArtwork: playlist['image'],
+            playlistArtwork: playlist['image']?.toString(),
             size: size,
             cubeIcon: cubeIcon,
           ),

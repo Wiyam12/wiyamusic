@@ -26,23 +26,26 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:wiyamusic/constants/app_constants.dart';
+import 'package:wiyamusic/controllers/search_discovery_controller.dart';
 import 'package:wiyamusic/database/radio_stations.db.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/models/radio_model.dart';
+import 'package:wiyamusic/models/search_discovery_models.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/utilities/app_utils.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
+import 'package:wiyamusic/utilities/search_navigation.dart';
 import 'package:wiyamusic/widgets/artist_bar.dart';
-import 'package:wiyamusic/widgets/confirmation_dialog.dart';
-import 'package:wiyamusic/widgets/custom_bar.dart';
 import 'package:wiyamusic/widgets/custom_search_bar.dart';
+import 'package:wiyamusic/widgets/home/home_section_header.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
 import 'package:wiyamusic/widgets/playlist_bar.dart';
 import 'package:wiyamusic/widgets/radio_station_card.dart';
+import 'package:wiyamusic/widgets/search/search_discovery.dart';
 import 'package:wiyamusic/widgets/section_title.dart';
 import 'package:wiyamusic/widgets/song_bar.dart';
 
@@ -83,6 +86,79 @@ class _SearchPageState extends State<SearchPage> {
   List<String> _suggestionsList = [];
   Timer? _debounce;
   int _latestSuggestionRequest = 0;
+  int _lastHandledAutofocusToken = 0;
+  bool _isSearchFocused = false;
+  int _maxArtistsInList = 3;
+  late final SearchDiscoveryController _discoveryController;
+
+  bool get _hasSearchResults =>
+      _songsSearchResult.isNotEmpty ||
+      _artistsSearchResult.isNotEmpty ||
+      _albumsSearchResult.isNotEmpty ||
+      _playlistsSearchResult.isNotEmpty ||
+      _radioStationsSearchResult.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _discoveryController = SearchDiscoveryController()
+      ..addListener(_onDiscoveryChanged);
+    _inputNode.addListener(_onFocusChange);
+    SearchNavigation.autofocusToken.addListener(_onAutofocusToken);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _consumeAutofocusRequest();
+    });
+    unawaited(_discoveryController.load());
+  }
+
+  void _onDiscoveryChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _onFocusChange() {
+    final focused = _inputNode.hasFocus;
+    if (focused == _isSearchFocused) return;
+    setState(() => _isSearchFocused = focused);
+  }
+
+  /// Clears query/results and returns to Browse/Trending discovery.
+  void _resetToDiscovery({bool clearText = false}) {
+    _debounce?.cancel();
+    _latestSuggestionRequest++;
+    if (clearText && _searchBar.text.isNotEmpty) {
+      _searchBar.clear();
+    }
+    _songsSearchResult = [];
+    _artistsSearchResult = [];
+    _albumsSearchResult = [];
+    _playlistsSearchResult = [];
+    _radioStationsSearchResult = [];
+    _suggestionsList = [];
+    _fetchingSongs.value = false;
+    _maxArtistsInList = 3;
+    _isSearchFocused = false;
+    if (_inputNode.hasFocus) {
+      _inputNode.unfocus();
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _onAutofocusToken() {
+    _consumeAutofocusRequest();
+  }
+
+  void _consumeAutofocusRequest() {
+    final token = SearchNavigation.autofocusToken.value;
+    if (token == 0 || token == _lastHandledAutofocusToken) return;
+    _lastHandledAutofocusToken = token;
+
+    Future<void>.delayed(const Duration(milliseconds: 220), () {
+      if (!mounted) return;
+      _inputNode.requestFocus();
+      final text = _searchBar.text;
+      _searchBar.selection = TextSelection.collapsed(offset: text.length);
+    });
+  }
 
   Future<void> _submitSearch([String? query]) async {
     if (query != null) {
@@ -95,14 +171,36 @@ class _SearchPageState extends State<SearchPage> {
     _latestSuggestionRequest++;
     _debounce?.cancel();
     _suggestionsList = [];
+    _maxArtistsInList = 3;
     if (mounted) setState(() {});
 
     await search();
     _inputNode.unfocus();
   }
 
+  void _openGenrePage(String genre) {
+    final normalized = genre.trim();
+    if (normalized.isEmpty) return;
+    _inputNode.unfocus();
+    context.push(
+      '${NavigationManager.searchPath}/genre/${Uri.encodeComponent(normalized)}',
+    );
+  }
+
+  void _removeHistoryQuery(String query) {
+    if (!searchHistory.contains(query)) return;
+    final updatedHistory = List.from(searchHistory)..remove(query);
+    searchHistoryNotifier.value = updatedHistory;
+    unawaited(addOrUpdateData<List>('user', 'searchHistory', updatedHistory));
+  }
+
   @override
   void dispose() {
+    _inputNode.removeListener(_onFocusChange);
+    SearchNavigation.autofocusToken.removeListener(_onAutofocusToken);
+    _discoveryController
+      ..removeListener(_onDiscoveryChanged)
+      ..dispose();
     _searchBar.dispose();
     _inputNode.dispose();
     _fetchingSongs.dispose();
@@ -114,13 +212,7 @@ class _SearchPageState extends State<SearchPage> {
     final query = _searchBar.text;
 
     if (query.isEmpty) {
-      _songsSearchResult = [];
-      _artistsSearchResult = [];
-      _albumsSearchResult = [];
-      _playlistsSearchResult = [];
-      _radioStationsSearchResult = [];
-      _suggestionsList = [];
-      if (mounted) setState(() {});
+      _resetToDiscovery();
       return;
     }
     _fetchingSongs.value = true;
@@ -150,7 +242,6 @@ class _SearchPageState extends State<SearchPage> {
       _albumsSearchResult = results[2];
       _playlistsSearchResult = results[3];
 
-      // Filter radio stations by name or genre
       _radioStationsSearchResult = radioStationsDB
           .where(
             (station) =>
@@ -193,9 +284,9 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
     return Scaffold(
-      appBar: AppBar(title: Text(context.l10n!.search)),
       body: SingleChildScrollView(
         padding: commonSingleChildScrollViewPadding,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         child: Column(
           children: <Widget>[
             LayoutBuilder(
@@ -209,18 +300,25 @@ class _SearchPageState extends State<SearchPage> {
                     loadingProgressNotifier: _fetchingSongs,
                     controller: _searchBar,
                     focusNode: _inputNode,
-                    labelText: '${context.l10n!.search}...',
+                    labelText: 'Search songs, artists, albums...',
                     onChanged: (value) {
-                      // debounce suggestions to avoid rapid API calls
                       _debounce?.cancel();
                       final query = value;
                       final requestId = ++_latestSuggestionRequest;
 
-                      // Clear suggestions immediately if input is empty
                       if (query.isEmpty) {
-                        _suggestionsList = [];
-                        if (mounted) setState(() {});
+                        _resetToDiscovery();
                         return;
+                      }
+
+                      // Typing a new query leaves previous results behind.
+                      if (_hasSearchResults) {
+                        _songsSearchResult = [];
+                        _artistsSearchResult = [];
+                        _albumsSearchResult = [];
+                        _playlistsSearchResult = [];
+                        _radioStationsSearchResult = [];
+                        if (mounted) setState(() {});
                       }
 
                       _debounce = Timer(
@@ -253,79 +351,15 @@ class _SearchPageState extends State<SearchPage> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [bar],
                   );
-                } else {
-                  return bar;
                 }
+                return bar;
               },
             ),
-
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child:
-                  (_suggestionsList.isNotEmpty ||
-                      (_songsSearchResult.isEmpty &&
-                          _artistsSearchResult.isEmpty &&
-                          _albumsSearchResult.isEmpty &&
-                          _playlistsSearchResult.isEmpty &&
-                          _radioStationsSearchResult.isEmpty))
-                  ? ValueListenableBuilder<List>(
-                      valueListenable: searchHistoryNotifier,
-                      builder: (context, searchHistory, _) {
-                        final items = _suggestionsList.isEmpty
-                            ? searchHistory
-                            : _suggestionsList;
-
-                        return Column(
-                          key: ValueKey(
-                            'history-${_suggestionsList.length}-${_searchBar.text}-${searchHistory.length}',
-                          ),
-                          children: [
-                            for (int index = 0; index < items.length; index++)
-                              Builder(
-                                builder: (context) {
-                                  final query = items[index];
-                                  final borderRadius = getItemBorderRadius(
-                                    index,
-                                    items.length,
-                                  );
-
-                                  return CustomBar(
-                                    query,
-                                    FluentIcons.search_24_regular,
-                                    borderRadius: borderRadius,
-                                    onTap: () async {
-                                      await _submitSearch(query.toString());
-                                    },
-                                    onLongPress: () async {
-                                      final confirm =
-                                          await _showConfirmationDialog(
-                                            context,
-                                          ) ??
-                                          false;
-                                      if (confirm &&
-                                          searchHistory.contains(query)) {
-                                        final updatedHistory = List.from(
-                                          searchHistory,
-                                        )..remove(query);
-                                        searchHistoryNotifier.value =
-                                            updatedHistory;
-                                        unawaited(
-                                          addOrUpdateData<List>(
-                                            'user',
-                                            'searchHistory',
-                                            updatedHistory,
-                                          ),
-                                        );
-                                      }
-                                    },
-                                  );
-                                },
-                              ),
-                          ],
-                        );
-                      },
-                    )
-                  : _buildSearchResults(context, primaryColor),
+              duration: const Duration(milliseconds: 220),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              child: _buildBelowSearchBar(context, primaryColor),
             ),
             const MiniPlayerBottomSpace(),
           ],
@@ -334,10 +368,104 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  Widget _buildBelowSearchBar(BuildContext context, Color primaryColor) {
+    if (_hasSearchResults) {
+      return KeyedSubtree(
+        key: const ValueKey('search-results'),
+        child: _buildSearchResults(context, primaryColor),
+      );
+    }
+
+    if (_isSearchFocused) {
+      return KeyedSubtree(
+        key: const ValueKey('search-recents'),
+        child: _buildFocusedContent(context),
+      );
+    }
+
+    return KeyedSubtree(
+      key: const ValueKey('search-discovery'),
+      child: SearchDiscoveryContent(
+        trendingSearches: _discoveryController.state.snapshot.trendingSearches,
+        topArtists: _discoveryController.state.snapshot.topArtists,
+        isLoading: _discoveryController.state.showSkeleton,
+        showEmpty:
+            _discoveryController.state.status == SearchDiscoveryStatus.error ||
+            _discoveryController.state.status == SearchDiscoveryStatus.empty,
+        onRetry: () => unawaited(_discoveryController.retry()),
+        onTrendingTap: _submitSearch,
+        onGenreTap: _openGenrePage,
+        onSeeAllArtists: () => _submitSearch('Top artists'),
+        onArtistTap: (artist) {
+          final artistId =
+              artist['ytid']?.toString() ?? artist['title']?.toString() ?? '';
+          if (artistId.isEmpty) return;
+          context.push(
+            '${NavigationManager.searchPath}/artist/${Uri.encodeComponent(artistId)}',
+            extra: artist,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildFocusedContent(BuildContext context) {
+    if (_suggestionsList.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const HomeSectionHeader(title: 'Suggestions'),
+          for (final suggestion in _suggestionsList)
+            SearchRecentTile(
+              title: suggestion,
+              subtitle: 'Search',
+              onTap: () => _submitSearch(suggestion),
+              onRemove: () {
+                _suggestionsList = List<String>.from(_suggestionsList)
+                  ..remove(suggestion);
+                setState(() {});
+              },
+            ),
+        ],
+      );
+    }
+
+    return ValueListenableBuilder<List>(
+      valueListenable: searchHistoryNotifier,
+      builder: (context, history, _) {
+        if (history.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(2, 24, 2, 0),
+            child: Text(
+              'No recent searches yet',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const HomeSectionHeader(title: 'Recent searches'),
+            for (final raw in history)
+              SearchRecentTile(
+                title: raw.toString(),
+                subtitle: 'Search',
+                onTap: () => _submitSearch(raw.toString()),
+                onRemove: () => _removeHistoryQuery(raw.toString()),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildSearchResults(BuildContext context, Color primaryColor) {
     final widgets = <Widget>[];
 
-    // Artists section
     if (_artistsSearchResult.isNotEmpty) {
       widgets.add(
         SectionTitle(
@@ -347,7 +475,7 @@ class _SearchPageState extends State<SearchPage> {
         ),
       );
 
-      final artists = _artistsSearchResult.take(3).toList();
+      final artists = _artistsSearchResult.take(_maxArtistsInList).toList();
       for (var index = 0; index < artists.length; index++) {
         final artist = Map<String, dynamic>.from(artists[index]);
         final artistId =
@@ -371,7 +499,6 @@ class _SearchPageState extends State<SearchPage> {
       }
     }
 
-    // Songs section
     if (_songsSearchResult.isNotEmpty) {
       widgets.add(
         SectionTitle(
@@ -400,7 +527,6 @@ class _SearchPageState extends State<SearchPage> {
       }
     }
 
-    // Albums section
     if (_albumsSearchResult.isNotEmpty) {
       widgets.add(
         SectionTitle(
@@ -432,7 +558,6 @@ class _SearchPageState extends State<SearchPage> {
       }
     }
 
-    // Playlists section
     if (_playlistsSearchResult.isNotEmpty) {
       widgets.add(
         SectionTitle(
@@ -467,7 +592,6 @@ class _SearchPageState extends State<SearchPage> {
       }
     }
 
-    // Radio Stations section
     if (_radioStationsSearchResult.isNotEmpty) {
       widgets.add(
         SectionTitle(
@@ -514,24 +638,6 @@ class _SearchPageState extends State<SearchPage> {
         'results-${_songsSearchResult.length}-${_artistsSearchResult.length}-${_albumsSearchResult.length}-${_playlistsSearchResult.length}',
       ),
       children: widgets,
-    );
-  }
-
-  Future<bool?> _showConfirmationDialog(BuildContext context) {
-    return showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return ConfirmationDialog(
-          confirmationMessage: context.l10n!.removeSearchQueryQuestion,
-          submitMessage: context.l10n!.confirm,
-          onCancel: () {
-            Navigator.of(context).pop(false);
-          },
-          onSubmit: () {
-            Navigator.of(context).pop(true);
-          },
-        );
-      },
     );
   }
 }

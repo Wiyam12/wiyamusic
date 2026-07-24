@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -28,14 +7,18 @@ import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/listening_stats_service.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
+import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/utilities/app_utils.dart';
 import 'package:wiyamusic/utilities/async_loader.dart';
 import 'package:wiyamusic/utilities/listening_stats_utils.dart';
 import 'package:wiyamusic/widgets/announcement_box.dart';
+import 'package:wiyamusic/widgets/home/home_featured_hero.dart';
+import 'package:wiyamusic/widgets/home/home_media_card.dart';
+import 'package:wiyamusic/widgets/home/home_section_header.dart';
 import 'package:wiyamusic/widgets/listening_recap_card.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
-import 'package:wiyamusic/widgets/playlist_cube.dart';
+import 'package:wiyamusic/widgets/search_entry_bar.dart';
 import 'package:wiyamusic/widgets/section_header.dart';
 import 'package:wiyamusic/widgets/song_bar.dart';
 
@@ -49,6 +32,8 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final Future<List> _suggestedPlaylistsFuture;
   late Future<List> _recommendedSongsFuture;
+
+  static const int _horizontalCardLimit = 8;
 
   @override
   void initState() {
@@ -75,39 +60,41 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final playlistHeight = MediaQuery.sizeOf(context).height * 0.25 / 1.1;
     return Scaffold(
-      appBar: AppBar(title: const Text('WiyaMusic.')),
+      // appBar: AppBar(title: const Text('WiyaMusic.')),
       body: SingleChildScrollView(
         padding: commonSingleChildScrollViewPadding,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const SearchEntryBar(hintText: 'Search songs, artists, albums...'),
             ValueListenableBuilder<String?>(
               valueListenable: announcementURL,
-              builder: (_, _url, __) {
-                if (_url == null) return const SizedBox.shrink();
+              builder: (_, url, __) {
+                if (url == null) return const SizedBox.shrink();
                 final isSponsorshipAnnouncement = isSponsorshipAnnouncementUrl(
-                  _url,
+                  url,
                 );
-                final _message = isSponsorshipAnnouncement
+                final message = isSponsorshipAnnouncement
                     ? context.l10n!.sponsorProject
                     : context.l10n!.newAnnouncement;
-                final _icon = isSponsorshipAnnouncement
+                final icon = isSponsorshipAnnouncement
                     ? FluentIcons.heart_24_filled
                     : FluentIcons.megaphone_24_filled;
 
                 return AnnouncementBox(
-                  message: _message,
-                  url: _url,
-                  icon: _icon,
+                  message: message,
+                  url: url,
+                  icon: icon,
                   onDismiss: () async {
                     announcementURL.value = null;
                   },
                 );
               },
             ),
-            _buildSuggestedPlaylists(playlistHeight),
-            _buildSuggestedPlaylists(playlistHeight, showOnlyLiked: true),
+            _buildFeaturedHero(),
+            _buildRecentlyPlayedSection(),
+            _buildMadeForYouSection(),
             _buildCurrentMonthRecapSection(),
             _buildRecommendedSongsSection(),
             const MiniPlayerBottomSpace(),
@@ -117,96 +104,129 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSuggestedPlaylists(
-    double playlistHeight, {
-    bool showOnlyLiked = false,
-  }) {
-    if (showOnlyLiked) {
-      return ValueListenableBuilder<List<Map>>(
-        valueListenable: userLikedPlaylists,
-        builder: (_, likedPlaylists, __) => _buildSuggestedPlaylistsSection(
-          playlistHeight,
-          likedPlaylists
-              .where((playlist) => !isArtistPlaylist(playlist))
-              .take(recommendedCubesNumber)
-              .toList(),
-          showOnlyLiked: true,
-        ),
-      );
-    }
-
+  Widget _buildFeaturedHero() {
     return AsyncLoader<List<dynamic>>(
       future: _suggestedPlaylistsFuture,
-      builder: (context, playlists) =>
-          _buildSuggestedPlaylistsSection(playlistHeight, playlists),
-    );
-  }
-
-  Widget _buildSuggestedPlaylistsSection(
-    double playlistHeight,
-    List<dynamic> playlists, {
-    bool showOnlyLiked = false,
-  }) {
-    if (playlists.isEmpty) return const SizedBox.shrink();
-
-    final sectionTitle = showOnlyLiked
-        ? context.l10n!.backToFavorites
-        : context.l10n!.suggestedPlaylists;
-    final itemsNumber = playlists.length.clamp(0, recommendedCubesNumber);
-    final isLargeScreen = MediaQuery.of(context).size.width > 480;
-
-    return Column(
-      children: [
-        SectionHeader(
-          title: sectionTitle,
-          icon: showOnlyLiked
-              ? FluentIcons.heart_24_filled
-              : FluentIcons.list_24_filled,
-        ),
-        ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: playlistHeight),
-          child: isLargeScreen
-              ? _buildHorizontalList(playlists, itemsNumber, playlistHeight)
-              : _buildCarouselView(playlists, itemsNumber, playlistHeight),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildHorizontalList(
-    List<dynamic> playlists,
-    int itemCount,
-    double height,
-  ) {
-    return ListView.builder(
-      scrollDirection: Axis.horizontal,
-      itemCount: itemCount,
-      itemBuilder: (context, index) {
-        final playlist = playlists[index];
+      builder: (context, playlists) {
+        if (playlists.isEmpty) return const SizedBox.shrink();
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: GestureDetector(
-            onTap: () => context.push('/home/playlist/${playlist['ytid']}'),
-            child: PlaylistCube(playlist, size: height),
+          padding: const EdgeInsets.only(top: 6),
+          child: HomeFeaturedHero(
+            playlists: playlists,
+            onOpen: _openPlaylist,
+            onPlay: _openPlaylist,
           ),
         );
       },
     );
   }
 
-  Widget _buildCarouselView(
-    List<dynamic> playlists,
-    int itemCount,
-    double height,
-  ) {
-    return CarouselView.weighted(
-      flexWeights: const <int>[3, 2, 1],
-      itemSnapping: true,
-      onTap: (index) =>
-          context.push('/home/playlist/${playlists[index]['ytid']}'),
-      children: List.generate(itemCount, (index) {
-        return PlaylistCube(playlists[index], size: height * 2);
-      }),
+  Widget _buildRecentlyPlayedSection() {
+    return ValueListenableBuilder<List>(
+      valueListenable: userRecentlyPlayed,
+      builder: (context, songs, _) {
+        if (songs.isEmpty) return const SizedBox.shrink();
+        final items = songs.take(_horizontalCardLimit).toList();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            HomeSectionHeader(
+              title: context.l10n!.recentlyPlayed,
+              onAction: () =>
+                  NavigationManager.router.go('/library/userSongs/recents'),
+            ),
+            SizedBox(
+              height: 204,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final song = Map<String, dynamic>.from(items[index] as Map);
+                  return HomeMediaCard(
+                    title: song['title']?.toString() ?? '',
+                    subtitle: song['artist']?.toString(),
+                    imageUrl: _songImage(song),
+                    onTap: () => audioHandler.playSong(song),
+                    onPlay: () => audioHandler.playSong(song),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMadeForYouSection() {
+    return ValueListenableBuilder<List<Map>>(
+      valueListenable: userLikedPlaylists,
+      builder: (context, likedPlaylists, _) {
+        final playlists = likedPlaylists
+            .where((playlist) => !isArtistPlaylist(playlist))
+            .take(_horizontalCardLimit)
+            .toList();
+
+        if (playlists.isEmpty) {
+          return AsyncLoader<List<dynamic>>(
+            future: _suggestedPlaylistsFuture,
+            builder: (context, suggested) {
+              if (suggested.isEmpty) return const SizedBox.shrink();
+              return _buildHorizontalPlaylistRail(
+                title: context.l10n!.recommendedForYou,
+                playlists: suggested.take(_horizontalCardLimit).toList(),
+                showForYouBadge: true,
+              );
+            },
+          );
+        }
+
+        return _buildHorizontalPlaylistRail(
+          title: context.l10n!.recommendedForYou,
+          playlists: playlists,
+          showForYouBadge: true,
+          onSeeAll: () => NavigationManager.router.go('/library'),
+        );
+      },
+    );
+  }
+
+  Widget _buildHorizontalPlaylistRail({
+    required String title,
+    required List playlists,
+    required bool showForYouBadge,
+    VoidCallback? onSeeAll,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        HomeSectionHeader(title: title, onAction: onSeeAll),
+        SizedBox(
+          height: 204,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: playlists.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final playlist = Map<String, dynamic>.from(
+                playlists[index] as Map,
+              );
+              return HomeMediaCard(
+                title: playlist['title']?.toString() ?? '',
+                subtitle: playlist['isAlbum'] == true
+                    ? context.l10n!.album
+                    : context.l10n!.playlist,
+                imageUrl: playlist['image']?.toString(),
+                showForYouBadge: showForYouBadge,
+                onTap: () => _openPlaylist(playlist),
+                onPlay: () => _openPlaylist(playlist),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -284,30 +304,23 @@ class _HomePageState extends State<HomePage> {
     BuildContext context,
     List<dynamic> data,
   ) {
-    final recommendedTitle = context.l10n!.recommendedForYou;
+    final recommendedTitle = context.l10n!.suggestedPlaylists;
 
     return Column(
       children: [
-        SectionHeader(
+        HomeSectionHeader(
           title: recommendedTitle,
-          icon: FluentIcons.sparkle_24_filled,
-          actionButton: IconButton(
-            onPressed: () async {
-              await audioHandler.playPlaylistSong(
-                playlist: {'title': recommendedTitle, 'list': data},
-                songIndex: 0,
-              );
-            },
-            icon: Icon(
-              FluentIcons.play_circle_24_filled,
-              color: Theme.of(context).colorScheme.primary,
-              size: 30,
-            ),
-          ),
+          actionLabel: context.l10n!.play,
+          onAction: () async {
+            await audioHandler.playPlaylistSong(
+              playlist: {'title': recommendedTitle, 'list': data},
+              songIndex: 0,
+            );
+          },
         ),
         ListView.builder(
           shrinkWrap: true,
-          physics: const BouncingScrollPhysics(),
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: data.length,
           padding: commonListViewBottomPadding,
           itemBuilder: (context, index) {
@@ -320,5 +333,21 @@ class _HomePageState extends State<HomePage> {
         ),
       ],
     );
+  }
+
+  void _openPlaylist(Map playlist) {
+    final ytid = playlist['ytid']?.toString();
+    if (ytid == null || ytid.isEmpty) return;
+    context.push('/home/playlist/$ytid');
+  }
+
+  String? _songImage(Map song) {
+    final highRes = song['highResImage']?.toString();
+    if (highRes != null && highRes.isNotEmpty) return highRes;
+    final lowRes = song['lowResImage']?.toString();
+    if (lowRes != null && lowRes.isNotEmpty) return lowRes;
+    final artworkPath = song['artworkPath']?.toString();
+    if (artworkPath != null && artworkPath.isNotEmpty) return artworkPath;
+    return null;
   }
 }

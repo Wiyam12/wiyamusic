@@ -39,12 +39,21 @@ void showCreatePlaylistDialog(
   String? imageUrl;
   String? imageBase64;
 
-  showDialog(
+  showModalBottomSheet<void>(
     context: context,
+    isScrollControlled: true,
+    useRootNavigator: true,
+    showDragHandle: true,
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
     builder: (BuildContext context) {
       return StatefulBuilder(
         builder: (context, dialogSetState) {
           final colorScheme = Theme.of(context).colorScheme;
+          final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+          final bottomSafe = MediaQuery.paddingOf(context).bottom;
 
           Future<void> _pickImage() async {
             final result = await pickImage();
@@ -63,42 +72,92 @@ void showCreatePlaylistDialog(
             );
           }
 
-          return AlertDialog(
-            icon: Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                FluentIcons.add_24_filled,
-                color: colorScheme.primary,
-                size: 32,
-              ),
-            ),
-            title: Text(
-              context.l10n!.addPlaylist,
-              style: TextStyle(
-                color: colorScheme.onSurface,
-                fontWeight: FontWeight.w600,
-                fontSize: 20,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            titleTextStyle: TextStyle(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w600,
-              fontSize: 20,
-            ),
-            content: SingleChildScrollView(
+          Future<void> _submit() async {
+            if (isYouTubeMode && id.isNotEmpty) {
+              final result = await addUserPlaylist(id, context);
+              if (context.mounted) showToast(context, result);
+              if (!context.mounted) return;
+              Navigator.pop(context);
+            } else if (!isYouTubeMode && customPlaylistName.isNotEmpty) {
+              final (result, newPlaylistId) = createCustomPlaylist(
+                customPlaylistName.trim(),
+                imageBase64 ?? imageUrl,
+                context,
+              );
+              if (songToAdd != null) {
+                if (context.mounted) {
+                  final addResult = addSongInCustomPlaylist(
+                    context,
+                    newPlaylistId,
+                    songToAdd,
+                  );
+                  showToast(context, addResult);
+                }
+              } else if (songsToAdd != null && songsToAdd.isNotEmpty) {
+                if (context.mounted) {
+                  final addResult = addSongsInCustomPlaylist(
+                    context,
+                    newPlaylistId,
+                    songsToAdd,
+                  );
+                  showToast(context, addResult);
+                }
+              } else {
+                if (context.mounted) showToast(context, result);
+              }
+              if (!context.mounted) return;
+              Navigator.pop(context);
+            } else {
+              showToast(
+                context,
+                '${context.l10n!.provideIdOrNameError}.',
+              );
+            }
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: bottomInset),
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, bottomSafe + 20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
+                  Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          FluentIcons.add_24_filled,
+                          color: colorScheme.primary,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          context.l10n!.addPlaylist,
+                          style: TextStyle(
+                            color: colorScheme.onSurface,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 20,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
                   if (songToAdd == null && songsToAdd == null)
                     Container(
                       decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerLow,
+                        color: colorScheme.surfaceContainerHighest.withValues(
+                          alpha: 0.55,
+                        ),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       padding: const EdgeInsets.all(4),
@@ -205,7 +264,8 @@ void showCreatePlaylistDialog(
                         ],
                       ),
                     ),
-                  const SizedBox(height: 20),
+                  if (songToAdd == null && songsToAdd == null)
+                    const SizedBox(height: 20),
                   if (isYouTubeMode)
                     TextField(
                       decoration: InputDecoration(
@@ -218,7 +278,7 @@ void showCreatePlaylistDialog(
                           borderRadius: BorderRadius.circular(12),
                         ),
                         filled: true,
-                        fillColor: colorScheme.surfaceContainerLow,
+                        fillColor: colorScheme.surface,
                       ),
                       onChanged: (value) {
                         id = value;
@@ -236,7 +296,7 @@ void showCreatePlaylistDialog(
                           borderRadius: BorderRadius.circular(12),
                         ),
                         filled: true,
-                        fillColor: colorScheme.surfaceContainerLow,
+                        fillColor: colorScheme.surface,
                       ),
                       autofocus: true,
                       onChanged: (value) {
@@ -256,7 +316,7 @@ void showCreatePlaylistDialog(
                             borderRadius: BorderRadius.circular(12),
                           ),
                           filled: true,
-                          fillColor: colorScheme.surfaceContainerLow,
+                          fillColor: colorScheme.surface,
                         ),
                         onChanged: (value) {
                           imageUrl = value;
@@ -275,68 +335,41 @@ void showCreatePlaylistDialog(
                       _imagePreview(),
                     ],
                   ],
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: colorScheme.outline),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          child: Text(context.l10n!.cancel),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _submit,
+                          icon: const Icon(FluentIcons.add_20_filled),
+                          label: Text(context.l10n!.add),
+                          style: FilledButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            actionsAlignment: MainAxisAlignment.center,
-            actions: <Widget>[
-              OutlinedButton(
-                onPressed: () => Navigator.pop(context),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: colorScheme.outline),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(context.l10n!.cancel),
-              ),
-              FilledButton.icon(
-                onPressed: () async {
-                  if (isYouTubeMode && id.isNotEmpty) {
-                    final result = await addUserPlaylist(id, context);
-                    if (context.mounted) showToast(context, result);
-                    if (!context.mounted) return;
-                    Navigator.pop(context);
-                  } else if (!isYouTubeMode && customPlaylistName.isNotEmpty) {
-                    final (result, newPlaylistId) = createCustomPlaylist(
-                      customPlaylistName.trim(),
-                      imageBase64 ?? imageUrl,
-                      context,
-                    );
-                    if (songToAdd != null) {
-                      if (context.mounted) {
-                        final addResult = addSongInCustomPlaylist(
-                          context,
-                          newPlaylistId,
-                          songToAdd,
-                        );
-                        showToast(context, addResult);
-                      }
-                    } else if (songsToAdd != null && songsToAdd.isNotEmpty) {
-                      if (context.mounted) {
-                        final addResult = addSongsInCustomPlaylist(
-                          context,
-                          newPlaylistId,
-                          songsToAdd,
-                        );
-                        showToast(context, addResult);
-                      }
-                    } else {
-                      if (context.mounted) showToast(context, result);
-                    }
-                    if (!context.mounted) return;
-                    Navigator.pop(context);
-                  } else {
-                    showToast(
-                      context,
-                      '${context.l10n!.provideIdOrNameError}.',
-                    );
-                  }
-                },
-                icon: const Icon(FluentIcons.add_20_filled),
-                label: Text(context.l10n!.add),
-              ),
-            ],
           );
         },
       );
