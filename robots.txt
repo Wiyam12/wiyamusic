@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://wiyam12.github.io/wiyamusic/sitemap.xml

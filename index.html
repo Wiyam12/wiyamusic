@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WiyaMusic — Stream effortlessly with one app</title>
+    <meta
+      name="description"
+      content="WiyaMusic is a free, open-source music streaming app with offline listening, lyrics, equalizer, SponsorBlock, and no ads or subscriptions."
+    />
+    <meta name="theme-color" content="#050B1B" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="canonical" href="https://wiyam12.github.io/wiyamusic/" />
+    <link rel="icon" type="image/png" href="assets/icons/wiyamusic_icon.png" />
+    <link rel="apple-touch-icon" href="assets/icons/wiyamusic_icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="WiyaMusic" />
+    <meta property="og:title" content="WiyaMusic — Stream effortlessly with one app" />
+    <meta
+      property="og:description"
+      content="Free open-source music streaming with offline listening, lyrics, equalizer, and no ads."
+    />
+    <meta
+      property="og:image"
+      content="https://wiyam12.github.io/wiyamusic/assets/icons/wiyamusic_icon.png"
+    />
+    <meta property="og:url" content="https://wiyam12.github.io/wiyamusic/" />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="WiyaMusic" />
+    <meta
+      name="twitter:description"
+      content="Unlock the full potential of music: Stream effortlessly with one app!"
+    />
+    <meta
+      name="twitter:image"
+      content="https://wiyam12.github.io/wiyamusic/assets/icons/wiyamusic_icon.png"
+    />
+
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header" data-header>
+      <div class="container header-inner">
+        <a class="brand" href="#top" aria-label="WiyaMusic home">
+          <img
+            src="assets/icons/wiyamusic_icon.png"
+            alt=""
+            width="40"
+            height="40"
+          />
+          <span>WiyaMusic</span>
+        </a>
+
+        <button
+          class="nav-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="site-nav"
+          data-nav-toggle
+        >
+          <span class="sr-only">Menu</span>
+          <span class="nav-toggle-bar" aria-hidden="true"></span>
+          <span class="nav-toggle-bar" aria-hidden="true"></span>
+          <span class="nav-toggle-bar" aria-hidden="true"></span>
+        </button>
+
+        <nav class="site-nav" id="site-nav" data-nav>
+          <a href="#features">Features</a>
+          <a href="#screenshots">Screenshots</a>
+          <a href="#open-source">Open Source</a>
+          <a href="#faq">FAQ</a>
+          <a class="button button-small" href="#download">Download</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Free · Open source · No ads</p>
+            <h1>Unlock the full potential of music</h1>
+            <p class="lead">
+              Stream effortlessly with one app. WiyaMusic brings search,
+              offline listening, lyrics, equalizer presets, and SponsorBlock
+              together in a clean Material experience — with no subscriptions.
+            </p>
+            <div class="hero-actions" id="download">
+              <a
+                class="store-badge"
+                href="https://github.com/Wiyam12/wiyamusic/releases/latest"
+                rel="noopener noreferrer"
+              >
+                <img
+                  src="assets/badges/get-it-on-github.png"
+                  alt="Get it on GitHub"
+                  height="64"
+                />
+              </a>
+              <a
+                class="store-badge"
+                href="https://f-droid.org/packages/com.wiyamusic.app.fdroid"
+                rel="noopener noreferrer"
+              >
+                <img
+                  src="assets/badges/get-it-on-fdroid.png"
+                  alt="Get it on F-Droid"
+                  height="64"
+                />
+              </a>
+            </div>
+            <p class="hero-meta">
+              Android · GPL-3.0 ·
+              <a
+                href="https://github.com/Wiyam12/wiyamusic"
+                rel="noopener noreferrer"
+                >View source</a
+              >
+            </p>
+          </div>
+
+          <div class="hero-visual" aria-hidden="true">
+            <div class="glass-orb"></div>
+            <img
+              class="hero-icon"
+              src="assets/icons/wiyamusic_icon.png"
+              alt=""
+              width="280"
+              height="280"
+            />
+            <div class="hero-card">
+              <strong>21 languages</strong>
+              <span>Offline · Lyrics · Equalizer</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section highlights" aria-label="Highlights">
+        <div class="container highlight-grid">
+          <article class="highlight-card">
+            <h2>No ads</h2>
+            <p>Listen without interruptions or paywalls.</p>
+          </article>
+          <article class="highlight-card">
+            <h2>Offline ready</h2>
+            <p>Download songs and keep your library with you.</p>
+          </article>
+          <article class="highlight-card">
+            <h2>Open source</h2>
+            <p>Inspect, contribute, and self-verify every release.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <div class="container">
+          <div class="section-heading">
+            <p class="eyebrow">Features</p>
+            <h2>Everything you need to listen your way</h2>
+            <p>
+              Built for discovery and daily listening, with the extras that
+              usually hide behind subscriptions.
+            </p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card">
+              <h3>Smart search</h3>
+              <p>Find songs fast with online search and suggestions.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Offline listening</h3>
+              <p>Save tracks and keep playing without a connection.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Import &amp; export</h3>
+              <p>Back up your data so you never lose your library.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Custom playlists</h3>
+              <p>Add playlists with a link and build your own mixes.</p>
+            </article>
+            <article class="feature-card">
+              <h3>SponsorBlock</h3>
+              <p>Skip sponsored segments automatically while you listen.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Lyrics support</h3>
+              <p>Follow along with lyrics while the track plays.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Built-in equalizer</h3>
+              <p>Tune the sound with presets for different moods.</p>
+            </article>
+            <article class="feature-card">
+              <h3>Material UI</h3>
+              <p>
+                Accent colors and dynamic colors on Android 12+ keep the UI
+                personal.
+              </p>
+            </article>
+            <article class="feature-card">
+              <h3>Built-in updater</h3>
+              <p>Stay current with releases directly from the app.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-alt" id="screenshots">
+        <div class="container">
+          <div class="section-heading">
+            <p class="eyebrow">Screenshots</p>
+            <h2>A dark, focused listening experience</h2>
+            <p>
+              Home, library, now playing, and album views designed for mobile
+              first.
+            </p>
+          </div>
+
+          <div class="screenshot-rail" data-rail>
+            <figure class="phone-frame">
+              <img
+                src="assets/images/screenshot-01.jpg"
+                alt="WiyaMusic home screen"
+                loading="lazy"
+                width="806"
+                height="1795"
+              />
+            </figure>
+            <figure class="phone-frame">
+              <img
+                src="assets/images/screenshot-02.jpg"
+                alt="WiyaMusic library screen"
+                loading="lazy"
+                width="806"
+                height="1795"
+              />
+            </figure>
+            <figure class="phone-frame">
+              <img
+                src="assets/images/screenshot-03.jpg"
+                alt="WiyaMusic now playing screen"
+                loading="lazy"
+                width="806"
+                height="1795"
+              />
+            </figure>
+            <figure class="phone-frame">
+              <img
+                src="assets/images/screenshot-04.jpg"
+                alt="WiyaMusic album detail screen"
+                loading="lazy"
+                width="806"
+                height="1795"
+              />
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="open-source">
+        <div class="container open-source-grid">
+          <div>
+            <p class="eyebrow">Open source</p>
+            <h2>Free software you can trust</h2>
+            <p>
+              WiyaMusic is licensed under GPL v3.0. You can use, modify, and
+              distribute it freely while keeping the source open. Contributions
+              are welcome.
+            </p>
+            <div class="inline-actions">
+              <a
+                class="button"
+                href="https://github.com/Wiyam12/wiyamusic"
+                rel="noopener noreferrer"
+                >GitHub repository</a
+              >
+              <a
+                class="button button-ghost"
+                href="https://github.com/Wiyam12/wiyamusic/blob/master/CONTRIBUTING.md"
+                rel="noopener noreferrer"
+                >Contributing guide</a
+              >
+            </div>
+          </div>
+          <aside class="glass-panel">
+            <h3>Also free</h3>
+            <ul>
+              <li>No ads</li>
+              <li>No subscriptions</li>
+              <li>21 supported languages</li>
+              <li>Community-driven releases</li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section section-alt" id="faq">
+        <div class="container narrow">
+          <div class="section-heading">
+            <p class="eyebrow">FAQ</p>
+            <h2>Common questions</h2>
+          </div>
+
+          <div class="faq-list">
+            <details>
+              <summary>Is WiyaMusic free?</summary>
+              <p>
+                Yes. There are no ads and no subscriptions. The app is free
+                software under the GPL v3.0 license.
+              </p>
+            </details>
+            <details>
+              <summary>Where can I download it?</summary>
+              <p>
+                Get the latest APK from
+                <a
+                  href="https://github.com/Wiyam12/wiyamusic/releases/latest"
+                  rel="noopener noreferrer"
+                  >GitHub Releases</a
+                >
+                or install from
+                <a
+                  href="https://f-droid.org/packages/com.wiyamusic.app.fdroid"
+                  rel="noopener noreferrer"
+                  >F-Droid</a
+                >.
+              </p>
+            </details>
+            <details>
+              <summary>Does it work offline?</summary>
+              <p>
+                Yes. You can download songs for offline listening and export or
+                import your data to keep your library safe.
+              </p>
+            </details>
+            <details>
+              <summary>Where can I read more FAQ answers?</summary>
+              <p>
+                See the community discussion
+                <a
+                  href="https://github.com/Wiyam12/wiyamusic/discussions/728"
+                  rel="noopener noreferrer"
+                  >here</a
+                >.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section cta">
+        <div class="container cta-panel">
+          <div>
+            <h2>Start listening with WiyaMusic</h2>
+            <p>
+              Download the latest release and stream without noise, ads, or
+              subscriptions.
+            </p>
+          </div>
+          <div class="hero-actions">
+            <a
+              class="button"
+              href="https://github.com/Wiyam12/wiyamusic/releases/latest"
+              rel="noopener noreferrer"
+              >Download latest</a
+            >
+            <a
+              class="button button-ghost"
+              href="https://f-droid.org/packages/com.wiyamusic.app.fdroid"
+              rel="noopener noreferrer"
+              >Get on F-Droid</a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <div>
+          <a class="brand" href="#top">
+            <img
+              src="assets/icons/wiyamusic_icon.png"
+              alt=""
+              width="32"
+              height="32"
+            />
+            <span>WiyaMusic</span>
+          </a>
+          <p class="footer-copy">
+            Unlock the full potential of music: Stream effortlessly with one
+            app!
+          </p>
+        </div>
+
+        <div>
+          <h3>Links</h3>
+          <ul>
+            <li>
+              <a
+                href="https://github.com/Wiyam12/wiyamusic"
+                rel="noopener noreferrer"
+                >Source code</a
+              >
+            </li>
+            <li>
+              <a
+                href="https://github.com/Wiyam12/wiyamusic/releases"
+                rel="noopener noreferrer"
+                >Releases</a
+              >
+            </li>
+            <li>
+              <a
+                href="https://github.com/Wiyam12/wiyamusic/issues"
+                rel="noopener noreferrer"
+                >Issues</a
+              >
+            </li>
+            <li>
+              <a
+                href="https://github.com/Wiyam12/wiyamusic/blob/master/LICENSE"
+                rel="noopener noreferrer"
+                >License</a
+              >
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h3>Credits</h3>
+          <p>
+            Based on
+            <a
+              href="https://github.com/gokadzev/Musify"
+              rel="noopener noreferrer"
+              >Musify</a
+            >
+            by Valeri Gokadze.
+          </p>
+          <p class="small">
+            Paytone One font licensed under the SIL Open Font License 1.1.
+          </p>
+        </div>
+      </div>
+
+      <div class="container legal">
+        <p>
+          Copyright © 2026 Valeri Gokadze. WiyaMusic is free software licensed
+          under GPL v3.0.
+        </p>
+        <p class="disclaimer">
+          WiyaMusic and its contributors do not host, own, or distribute any
+          copyrighted audio content. The app provides access to content through
+          plugins and external sources. All trademarks, songs, audio files, and
+          related content remain the property of their respective owners. Users
+          are solely responsible for ensuring that their use of the app complies
+          with local laws, copyright regulations, and the terms of service of
+          the respective content providers.
+        </p>
+      </div>
+    </footer>
+
+    <script src="js/main.js" defer></script>
+  </body>
+</html>
