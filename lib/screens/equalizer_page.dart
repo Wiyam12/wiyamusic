@@ -21,10 +21,10 @@
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:wiyamusic/constants/app_constants.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/models/equalizer_models.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
 
@@ -36,7 +36,7 @@ class EqualizerPage extends StatefulWidget {
 }
 
 class _EqualizerPageState extends State<EqualizerPage> {
-  AndroidEqualizerParameters? _params;
+  EqualizerParametersInfo? _params;
   List<double> _gains = [];
   bool _enabled = equalizerEnabled.value;
   bool _isLoading = true;
@@ -155,6 +155,11 @@ class _EqualizerPageState extends State<EqualizerPage> {
   }
 
   Future<void> _loadEqualizer() async {
+    if (!audioHandler.isEqualizerSupported) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
     try {
       final params = await audioHandler.getEqualizerParameters();
       if (!mounted) return;
@@ -183,34 +188,37 @@ class _EqualizerPageState extends State<EqualizerPage> {
 
   String _formatFrequency(double hz) {
     if (hz >= 1000) {
-      return hz >= 10000
-          ? '${(hz / 1000).toStringAsFixed(0)} kHz'
-          : '${(hz / 1000).toStringAsFixed(1)} kHz';
+      final kHz = hz / 1000;
+      return kHz >= 10 || kHz == kHz.roundToDouble()
+          ? '${kHz.round()}kHz'
+          : '${kHz.toStringAsFixed(1)}kHz';
     }
-    return '${hz.round()} Hz';
+    return '${hz.round()}Hz';
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isSupported = audioHandler.isEqualizerSupported;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(context.l10n!.equalizer),
+        // title: Text(context.l10n!.equalizer),
         actions: [
-          IconButton(
-            icon: const Icon(FluentIcons.arrow_clockwise_24_filled),
-            tooltip: context.l10n!.equalizerResetBands,
-            onPressed: () async {
-              await audioHandler.resetEqualizerBands();
-              final params = _params;
-              if (!mounted || params == null) return;
-              setState(() {
-                _gains = List<double>.filled(params.bands.length, 0);
-                _activePreset = null;
-              });
-            },
-          ),
+          if (isSupported)
+            IconButton(
+              icon: const Icon(FluentIcons.arrow_clockwise_24_filled),
+              tooltip: context.l10n!.equalizerResetBands,
+              onPressed: () async {
+                await audioHandler.resetEqualizerBands();
+                final params = _params;
+                if (!mounted || params == null) return;
+                setState(() {
+                  _gains = List<double>.filled(params.bands.length, 0);
+                  _activePreset = null;
+                });
+              },
+            ),
         ],
       ),
       body: _isLoading
@@ -220,7 +228,9 @@ class _EqualizerPageState extends State<EqualizerPage> {
               child: Padding(
                 padding: commonSingleChildScrollViewPadding,
                 child: Text(
-                  context.l10n!.equalizerInitFailed,
+                  isSupported
+                      ? context.l10n!.equalizerInitFailed
+                      : context.l10n!.equalizerAndroidOnly,
                   style: Theme.of(context).textTheme.bodyLarge,
                   textAlign: TextAlign.center,
                 ),
@@ -229,45 +239,32 @@ class _EqualizerPageState extends State<EqualizerPage> {
           : ListView(
               padding: commonSingleChildScrollViewPadding,
               children: [
-                // Enable/Disable Section
-                Card.filled(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                context.l10n!.equalizerEnable,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(color: colorScheme.onSurface),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _enabled
-                                    ? context.l10n!.equalizerEnabledHint
-                                    : context.l10n!.equalizerDisabledHint,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Switch.adaptive(
-                          value: _enabled,
-                          onChanged: (value) async {
-                            await audioHandler.setEqualizerEnabled(value);
-                            if (!mounted) return;
-                            setState(() => _enabled = value);
-                          },
-                        ),
-                      ],
-                    ),
+                // Enable/Disable — simple label + switch
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        context.l10n!.equalizer,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: colorScheme.onSurface,
+                              fontWeight: FontWeight.w500,
+                            ),
+                      ),
+                      Switch.adaptive(
+                        value: _enabled,
+                        onChanged: (value) async {
+                          await audioHandler.setEqualizerEnabled(value);
+                          if (!mounted) return;
+                          setState(() => _enabled = value);
+                        },
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -279,7 +276,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        context.l10n!.equalizerPresets,
+                        context.l10n!.equalizer,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
@@ -310,127 +307,291 @@ class _EqualizerPageState extends State<EqualizerPage> {
                 ),
                 const SizedBox(height: 28),
 
-                // Bands Section
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            context.l10n!.equalizerBands,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ),
+                // Bands Section — vertical graphic EQ
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        context.l10n!.equalizerBands,
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Column(
-                          children: List.generate(_params!.bands.length, (
-                            index,
-                          ) {
-                            final band = _params!.bands[index];
-                            final gain = _gains[index];
-                            final min = _params!.minDecibels;
-                            final max = _params!.maxDecibels;
-                            final isLast = index == _params!.bands.length - 1;
-
-                            return Padding(
-                              padding: EdgeInsets.only(
-                                bottom: isLast ? 16 : 12,
-                              ),
-                              child: Card.filled(
-                                color: colorScheme.surface,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 12,
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            _formatFrequency(
-                                              band.centerFrequency,
-                                            ),
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleSmall
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color:
-                                                  colorScheme.primaryContainer,
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                            ),
-                                            child: Text(
-                                              '${gain.toStringAsFixed(1)} dB',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .labelSmall
-                                                  ?.copyWith(
-                                                    color: colorScheme
-                                                        .onPrimaryContainer,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Slider.adaptive(
-                                        value: gain.clamp(min, max),
-                                        min: min,
-                                        max: max,
-                                        divisions: ((max - min) * 2).round(),
-                                        label: '${gain.toStringAsFixed(1)} dB',
-                                        onChanged: (value) {
-                                          setState(() {
-                                            _gains[index] = value;
-                                            _activePreset = null;
-                                          });
-                                        },
-                                        onChangeEnd: (value) async {
-                                          await audioHandler
-                                              .setEqualizerBandGain(
-                                                index,
-                                                value,
-                                              );
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          }),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 16),
+                    _GraphicEqualizerBands(
+                      bands: _params!.bands,
+                      gains: _gains,
+                      minDecibels: _params!.minDecibels,
+                      maxDecibels: _params!.maxDecibels,
+                      formatFrequency: _formatFrequency,
+                      onChanged: (index, value) {
+                        setState(() {
+                          _gains[index] = value;
+                          _activePreset = null;
+                        });
+                      },
+                      onChangeEnd: (index, value) async {
+                        await audioHandler.setEqualizerBandGain(index, value);
+                      },
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 const MiniPlayerBottomSpace(),
               ],
             ),
+    );
+  }
+}
+
+/// Vertical graphic-EQ layout: dB scale on the left, band sliders across,
+/// frequency labels underneath — matching a classic 5-band EQ panel.
+class _GraphicEqualizerBands extends StatelessWidget {
+  const _GraphicEqualizerBands({
+    required this.bands,
+    required this.gains,
+    required this.minDecibels,
+    required this.maxDecibels,
+    required this.formatFrequency,
+    required this.onChanged,
+    required this.onChangeEnd,
+  });
+
+  final List<EqualizerBandInfo> bands;
+  final List<double> gains;
+  final double minDecibels;
+  final double maxDecibels;
+  final String Function(double hz) formatFrequency;
+  final void Function(int index, double value) onChanged;
+  final void Function(int index, double value) onChangeEnd;
+
+  static const double _sliderHeight = 220;
+  static const double _labelColumnWidth = 44;
+  static const double _freqLabelHeight = 28;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final labelStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
+      color: colorScheme.onSurface.withValues(alpha: 0.85),
+      fontWeight: FontWeight.w500,
+      letterSpacing: 0.2,
+    );
+
+    // Map 0 dB to Alignment.y (-1 top … 1 bottom).
+    final zeroY =
+        -1.0 + 2.0 * ((maxDecibels - 0) / (maxDecibels - minDecibels));
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // dB scale
+          SizedBox(
+            width: _labelColumnWidth,
+            height: _sliderHeight,
+            child: Stack(
+              children: [
+                Align(
+                  alignment: Alignment.topLeft,
+                  child: Text('+${maxDecibels.round()}db', style: labelStyle),
+                ),
+                Align(
+                  alignment: Alignment(-1, zeroY.clamp(-1.0, 1.0)),
+                  child: Text('0db', style: labelStyle),
+                ),
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Text('${minDecibels.round()}db', style: labelStyle),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          // Band sliders
+          Expanded(
+            child: SizedBox(
+              height: _sliderHeight + _freqLabelHeight,
+              child: Row(
+                children: List.generate(bands.length, (index) {
+                  return Expanded(
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          height: _sliderHeight,
+                          child: _VerticalEqSlider(
+                            value: gains[index].clamp(minDecibels, maxDecibels),
+                            min: minDecibels,
+                            max: maxDecibels,
+                            onChanged: (v) => onChanged(index, v),
+                            onChangeEnd: (v) => onChangeEnd(index, v),
+                          ),
+                        ),
+                        SizedBox(
+                          height: _freqLabelHeight,
+                          child: Center(
+                            child: Text(
+                              formatFrequency(bands[index].centerFrequency),
+                              style: labelStyle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VerticalEqSlider extends StatefulWidget {
+  const _VerticalEqSlider({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+    required this.onChangeEnd,
+  });
+
+  final double value;
+  final double min;
+  final double max;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+
+  @override
+  State<_VerticalEqSlider> createState() => _VerticalEqSliderState();
+}
+
+class _VerticalEqSliderState extends State<_VerticalEqSlider> {
+  static const double _thumbHeight = 28;
+  static const double _thumbWidth = 14;
+  static const double _trackWidth = 3;
+
+  double? _dragValue;
+
+  double _valueToY(double value, double height) {
+    final t = ((widget.max - value) / (widget.max - widget.min)).clamp(
+      0.0,
+      1.0,
+    );
+    final usable = height - _thumbHeight;
+    return t * usable;
+  }
+
+  double _yToValue(double localY, double height) {
+    final usable = height - _thumbHeight;
+    final t = ((localY - _thumbHeight / 2) / usable).clamp(0.0, 1.0);
+    return widget.max - t * (widget.max - widget.min);
+  }
+
+  void _handleDrag(Offset localPosition, double height) {
+    final next = _yToValue(localPosition.dy, height);
+    _dragValue = next;
+    widget.onChanged(next);
+  }
+
+  void _commitAt(Offset localPosition, double height) {
+    final next = _yToValue(localPosition.dy, height);
+    _dragValue = null;
+    widget.onChanged(next);
+    widget.onChangeEnd(next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final thumbColor = colorScheme.primary;
+    final deepColor = Color.lerp(
+      colorScheme.primary,
+      const Color(0xFF312E81),
+      0.65,
+    )!;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final height = constraints.maxHeight;
+        final width = constraints.maxWidth;
+        final thumbTop = _valueToY(widget.value, height);
+        final trackBottom = height - _thumbHeight / 2;
+        final activeTop = thumbTop + _thumbHeight / 2;
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragStart: (d) => _handleDrag(d.localPosition, height),
+          onVerticalDragUpdate: (d) => _handleDrag(d.localPosition, height),
+          onVerticalDragEnd: (_) {
+            widget.onChangeEnd(_dragValue ?? widget.value);
+            _dragValue = null;
+          },
+          onTapDown: (d) => _commitAt(d.localPosition, height),
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Inactive track (full height, thin)
+                Positioned(
+                  top: _thumbHeight / 2,
+                  bottom: _thumbHeight / 2,
+                  child: Container(
+                    width: _trackWidth,
+                    decoration: BoxDecoration(
+                      color: colorScheme.onSurface.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(_trackWidth),
+                    ),
+                  ),
+                ),
+                // Active track (bottom → thumb) with neon gradient
+                Positioned(
+                  top: activeTop,
+                  bottom: height - trackBottom,
+                  child: Container(
+                    width: _trackWidth,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(_trackWidth),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [thumbColor, deepColor],
+                      ),
+                    ),
+                  ),
+                ),
+                // Pill thumb
+                Positioned(
+                  top: thumbTop,
+                  child: Container(
+                    width: _thumbWidth,
+                    height: _thumbHeight,
+                    decoration: BoxDecoration(
+                      color: thumbColor,
+                      borderRadius: BorderRadius.circular(_thumbWidth),
+                      boxShadow: [
+                        BoxShadow(
+                          color: thumbColor.withValues(alpha: 0.45),
+                          blurRadius: 10,
+                          spreadRadius: 0.5,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

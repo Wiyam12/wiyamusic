@@ -114,12 +114,30 @@ String formatMonthPeriodLabel(Locale locale, String monthKey) {
 }
 
 AudioOnlyStreamInfo selectAudioOnlyStreamForQuality(
-  List<AudioOnlyStreamInfo> availableSources,
-) {
+  List<AudioOnlyStreamInfo> availableSources, {
+  bool appleSafeOnly = false,
+}) {
   final sortedByCompatibility = _sortAudioOnlyByCompatibility(availableSources);
-  final compatibleSources = _filterCompatibleAudioOnlySources(
+  var compatibleSources = _filterCompatibleAudioOnlySources(
     sortedByCompatibility,
   );
+
+  // Offline downloads on Apple must be AAC-in-MP4. Opus/Vorbis can be selected
+  // as a streaming fallback on Android, but AVPlayer can't play those files.
+  if (appleSafeOnly) {
+    compatibleSources = compatibleSources
+        .where(_isAppleSafeAudioOnlyStream)
+        .toList();
+    if (compatibleSources.isEmpty) {
+      compatibleSources = sortedByCompatibility
+          .where(_isAppleSafeAudioOnlyStream)
+          .toList();
+    }
+    if (compatibleSources.isEmpty) {
+      throw StateError('No Apple-safe AAC audio streams available');
+    }
+  }
+
   final selectionPool = compatibleSources.isNotEmpty
       ? compatibleSources
       : sortedByCompatibility;
@@ -248,4 +266,11 @@ bool _isPreferredAudioOnlyCodec(String codec, String container) {
   }
 
   return codec.contains('opus') || codec.contains('vorbis');
+}
+
+bool _isAppleSafeAudioOnlyStream(AudioOnlyStreamInfo stream) {
+  final codec = stream.codec.toString().toLowerCase();
+  final container = stream.container.name.toLowerCase();
+  return (codec.contains('mp4a') || codec.contains('aac')) &&
+      (container == 'mp4' || container == 'm4a');
 }

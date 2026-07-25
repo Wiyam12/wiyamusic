@@ -32,6 +32,9 @@ class NullArtworkWidget extends StatelessWidget {
     this.borderRadius = 20,
   });
 
+  static const String defaultArtworkAsset = 'assets/images/default_artwork.png';
+
+  /// Kept for call-site compatibility; the default artwork image is used instead.
   final IconData icon;
   final double? iconSize;
   final double size;
@@ -43,63 +46,58 @@ class NullArtworkWidget extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    final badgeSize = size * 0.4;
-    final calculatedIconSize = iconSize ?? (badgeSize * 0.5);
-
     return SizedBox(
       width: size,
       height: size,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(borderRadius),
-          color: colorScheme.surfaceContainerHighest,
-        ),
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: size),
-              child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: size * 0.08,
-                  vertical: size * 0.06,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Container(
-                      width: badgeSize,
-                      height: badgeSize,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: colorScheme.primaryContainer.withValues(
-                          alpha: 0.55,
-                        ),
-                      ),
-                      child: Icon(
-                        icon,
-                        size: calculatedIconSize,
-                        color: colorScheme.onPrimaryContainer,
-                      ),
-                    ),
-                    if (title != null) ...[
-                      SizedBox(height: size * 0.045),
-                      Text(
-                        title!,
-                        textAlign: TextAlign.center,
-                        style: textTheme.labelMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 2,
-                      ),
-                    ],
-                  ],
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(color: colorScheme.surfaceContainerHighest),
+            Positioned.fill(
+              child: Image.asset(
+                defaultArtworkAsset,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+                alignment: Alignment.center,
+                filterQuality: FilterQuality.medium,
+                errorBuilder: (_, __, ___) => Center(
+                  child: Icon(
+                    icon,
+                    size: iconSize ?? size * 0.2,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ),
-          ),
+            if (title != null)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    size * 0.08,
+                    0,
+                    size * 0.08,
+                    size * 0.06,
+                  ),
+                  child: Text(
+                    title!,
+                    textAlign: TextAlign.center,
+                    style: textTheme.labelMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      shadows: const [
+                        Shadow(blurRadius: 8, color: Colors.black54),
+                      ],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

@@ -28,6 +28,7 @@ import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 import 'package:wiyamusic/constants/clients.dart';
 import 'package:wiyamusic/main.dart' show logger;
+import 'package:wiyamusic/models/song_lyrics.dart';
 import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/lyrics_manager.dart';
@@ -64,6 +65,7 @@ var _songLikeUpdateToken = 0;
 final _latestSongLikeUpdateTokens = <String, int>{};
 
 final lyrics = ValueNotifier<String?>(null);
+SongLyrics? lastFetchedSongLyrics;
 String? lastFetchedLyrics;
 
 void reloadSongLibraryStateFromStorage() {
@@ -78,7 +80,6 @@ void reloadSongLibraryStateFromStorage() {
 
 // Timeouts and durations used across manifest fetching and cache validation.
 const Duration _manifestTimeout = Duration(seconds: 30);
-const Duration _cacheValidationDuration = Duration(hours: 1);
 
 /// Fetches a stream manifest for a song from a single client.
 Future<StreamManifest?> _fetchStreamManifestForClient(
@@ -220,16 +221,9 @@ Future<ResolvedSongStream?> _getCachedSongStream(
     'Origin': 'https://www.youtube.com',
   };
 
-  final cacheBox = await Hive.openBox('cache');
-  final cacheDate = cacheBox.get('${cacheKey}_date') as DateTime?;
-  final now = DateTime.now();
-  final isOld =
-      cacheDate != null && now.difference(cacheDate) > _cacheValidationDuration;
-
-  if (!isOld) {
-    return ResolvedSongStream(url: url, headers: headers);
-  }
-
+  // Always probe the CDN URL before returning it. Returning a "fresh" cached
+  // googlevideo URL while offline makes iOS playback hang on DNS failure
+  // instead of failing cleanly (or using a local download).
   if (await _validateStreamUrl(url, headers)) {
     return ResolvedSongStream(url: url, headers: headers);
   }
@@ -637,6 +631,10 @@ void cancelSongDownload(String ytid) {
   if (session != null) {
     session.cancelled = true;
   }
+  // Hide the progress/cancel UI immediately. The download coroutine may take a
+  // while to unwind (e.g. when blocked on a slow manifest fetch), so we don't
+  // wait for its `finally` block to clear the notifier.
+  _clearSongDownloadProgress(ytid);
 }
 
 class SongOfflineDownloadCancelled implements Exception {
@@ -667,41 +665,122 @@ Map<String, dynamic> getOfflineSongByYtid(String ytid) {
   }
 }
 
+/// Rewrites stale absolute offline paths (e.g. old iOS container UUIDs) to the
+/// current app documents directory. Safe to call on startup.
+Future<void> repairOfflineSongPaths() async {
+  try {
+    if (userOfflineSongs.value.isEmpty) return;
+
+    var changed = false;
+    final updated = <Map<String, dynamic>>[];
+
+    for (final raw in userOfflineSongs.value) {
+      final song = Map<String, dynamic>.from(raw as Map);
+      final ytid = song['ytid']?.toString();
+      if (ytid == null || ytid.isEmpty) {
+        updated.add(song);
+        continue;
+      }
+
+      final audioPath = await FilePaths.resolveExistingAudioPath(
+        ytid,
+        storedPath: song['audioPath']?.toString(),
+      );
+      if (audioPath != null && song['audioPath'] != audioPath) {
+        song['audioPath'] = audioPath;
+        changed = true;
+      }
+
+      final artworkPath = await FilePaths.resolveExistingArtworkPath(
+        ytid,
+        storedPath: song['artworkPath']?.toString(),
+      );
+      if (artworkPath != null && song['artworkPath'] != artworkPath) {
+        song['artworkPath'] = artworkPath;
+        changed = true;
+      }
+
+      updated.add(song);
+    }
+
+    if (!changed) return;
+
+    userOfflineSongs.value = updated;
+    await addOrUpdateData<List>(
+      'userNoBackup',
+      'offlineSongs',
+      userOfflineSongs.value,
+    );
+  } catch (e, stackTrace) {
+    logger.log(
+      'Error repairing offline song paths',
+      error: e,
+      stackTrace: stackTrace,
+    );
+  }
+}
+
+/// Persists remapped audio/artwork paths for a single offline song.
+Future<void> repairOfflineSongPathsForYtid(
+  String ytid, {
+  String? audioPath,
+  String? artworkPath,
+}) async {
+  try {
+    final index = userOfflineSongs.value.indexWhere((s) => s['ytid'] == ytid);
+    if (index == -1) return;
+
+    final song = Map<String, dynamic>.from(userOfflineSongs.value[index] as Map);
+    var changed = false;
+
+    if (audioPath != null &&
+        audioPath.isNotEmpty &&
+        song['audioPath'] != audioPath) {
+      song['audioPath'] = audioPath;
+      changed = true;
+    }
+    if (artworkPath != null &&
+        artworkPath.isNotEmpty &&
+        song['artworkPath'] != artworkPath) {
+      song['artworkPath'] = artworkPath;
+      changed = true;
+    }
+    if (!changed) return;
+
+    final updated = List<dynamic>.from(userOfflineSongs.value);
+    updated[index] = song;
+    userOfflineSongs.value = updated;
+    await addOrUpdateData<List>(
+      'userNoBackup',
+      'offlineSongs',
+      userOfflineSongs.value,
+    );
+  } catch (e, stackTrace) {
+    logger.log(
+      'Error repairing offline paths for $ytid',
+      error: e,
+      stackTrace: stackTrace,
+    );
+  }
+}
+
 Future<List<String>> getSearchSuggestions(String query) async {
-  // Custom implementation:
+  if (offlineMode.value || query.trim().isEmpty) {
+    return const [];
+  }
 
-  // const baseUrl = 'https://suggestqueries.google.com/complete/search';
-  // final parameters = {
-  //   'client': 'firefox',
-  //   'ds': 'yt',
-  //   'q': query,
-  // };
-
-  // final uri = Uri.parse(baseUrl).replace(queryParameters: parameters);
-
-  // try {
-  //   final response = await http.get(
-  //     uri,
-  //     headers: {
-  //       'User-Agent':
-  //           'Mozilla/5.0 (Windows NT 10.0; rv:96.0) Gecko/20100101 Firefox/96.0',
-  //     },
-  //   );
-
-  //   if (response.statusCode == 200) {
-  //     final suggestions = jsonDecode(response.body)[1] as List<dynamic>;
-  //     final suggestionStrings = suggestions.cast<String>().toList();
-  //     return suggestionStrings;
-  //   }
-  // } catch (e, stackTrace) {
-  //   logger.log('Error in getSearchSuggestions:$e\n$stackTrace');
-  // }
-
-  // Built-in implementation:
-
-  final suggestions = await ytClient.search.getQuerySuggestions(query);
-
-  return suggestions;
+  try {
+    return await ytClient.search.getQuerySuggestions(query);
+  } catch (e, stackTrace) {
+    // Network can be unavailable without offline mode being toggled on
+    // (e.g. airplane mode). Fail soft so typing still works.
+    logger.log(
+      'Error in getSearchSuggestions',
+      error: e,
+      stackTrace: stackTrace,
+    );
+    return const [];
+  }
 }
 
 Future<List<Map<String, int>>> getSkipSegments(String id) async {
@@ -776,7 +855,20 @@ Future<AudioOnlyStreamInfo?> fetchBestAudioStream(String? songId) async {
       logger.log('fetchBestAudioStream: no audio streams for $songId');
       return null;
     }
-    return selectAudioOnlyStreamForQuality(audioStream.sortByBitrate());
+    final preferAppleSafe = Platform.isIOS || Platform.isMacOS;
+    try {
+      return selectAudioOnlyStreamForQuality(
+        audioStream.sortByBitrate(),
+        appleSafeOnly: preferAppleSafe,
+      );
+    } on StateError catch (e, stackTrace) {
+      logger.log(
+        'fetchBestAudioStream: no Apple-safe stream for $songId',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }
   } on TimeoutException catch (_) {
     logger.log('fetchBestAudioStream request timed out for $songId');
     return null;
@@ -874,23 +966,151 @@ Future<Map<String, dynamic>> getSongDetails(
 }
 
 Future<String?> getSongLyrics(String? artist, String title) async {
-  if (artist == null) return null;
-  if (lastFetchedLyrics != '$artist - $title') {
-    lyrics.value = null;
-    var _lyrics = await LyricsManager().fetchLyrics(artist, title);
-    if (_lyrics != null) {
-      _lyrics = _lyrics.replaceAll(RegExp(r'\n{4}'), '\n\n');
-      _lyrics = _lyrics.replaceAll(RegExp(r'\n{2}'), '\n');
-      lyrics.value = _lyrics;
-    } else {
-      return null;
-    }
+  final result = await getSongLyricsData(artist: artist, title: title);
+  return result?.displayPlain;
+}
 
-    lastFetchedLyrics = '$artist - $title';
-    return _lyrics;
+Future<SongLyrics?> getSongLyricsData({
+  String? artist,
+  required String title,
+  String? album,
+  Duration? duration,
+  String? songId,
+}) async {
+  if (artist == null) return null;
+
+  final cacheKey = '$artist - $title';
+  if (lastFetchedLyrics == cacheKey && lastFetchedSongLyrics != null) {
+    return lastFetchedSongLyrics;
   }
 
-  return lyrics.value;
+  lyrics.value = null;
+  lastFetchedSongLyrics = null;
+
+  // Downloaded songs keep their lyrics on disk so they work without network.
+  final stored = await readStoredLyrics(songId);
+  if (stored != null && !stored.isEmpty) {
+    lyrics.value = stored.displayPlain;
+    lastFetchedSongLyrics = stored;
+    lastFetchedLyrics = cacheKey;
+    return stored;
+  }
+
+  final result = await LyricsManager().fetchLyrics(
+    artist,
+    title,
+    albumName: album,
+    duration: duration,
+  );
+
+  if (result == null || result.isEmpty) return null;
+
+  var plain = result.displayPlain;
+  plain = plain.replaceAll(RegExp(r'\n{4}'), '\n\n');
+  plain = plain.replaceAll(RegExp(r'\n{2}'), '\n');
+
+  final normalized = SongLyrics(
+    plain: plain,
+    syncedLines: result.syncedLines,
+    syncedRaw: result.syncedRaw,
+  );
+  lyrics.value = plain;
+  lastFetchedSongLyrics = normalized;
+  lastFetchedLyrics = cacheKey;
+
+  // Keep lyrics for songs that are available offline.
+  if (songId != null && songId.isNotEmpty && isSongAlreadyOffline(songId)) {
+    unawaited(writeStoredLyrics(songId, normalized));
+  }
+
+  return normalized;
+}
+
+/// Reads lyrics saved next to a downloaded song, if any.
+Future<SongLyrics?> readStoredLyrics(String? songId) async {
+  if (songId == null || songId.isEmpty) return null;
+
+  try {
+    final file = File(FilePaths.getLyricsPath(songId));
+    if (!await file.exists()) return null;
+
+    final decoded = jsonDecode(await file.readAsString());
+    if (decoded is! Map) return null;
+
+    final plain = decoded['plain'] as String?;
+    final syncedRaw = decoded['synced'] as String?;
+    final syncedLines = syncedRaw != null && syncedRaw.isNotEmpty
+        ? parseLrc(syncedRaw)
+        : const <LyricLine>[];
+
+    final stored = SongLyrics(
+      plain: plain,
+      syncedLines: syncedLines,
+      syncedRaw: syncedRaw,
+    );
+    return stored.isEmpty ? null : stored;
+  } catch (e, stackTrace) {
+    logger.log('Error reading stored lyrics', error: e, stackTrace: stackTrace);
+    return null;
+  }
+}
+
+Future<void> writeStoredLyrics(String songId, SongLyrics songLyrics) async {
+  if (songId.isEmpty || songLyrics.isEmpty) return;
+
+  try {
+    final file = File(FilePaths.getLyricsPath(songId));
+    await file.parent.create(recursive: true);
+    await file.writeAsString(jsonEncode(songLyrics.toJson()));
+  } catch (e, stackTrace) {
+    logger.log('Error saving lyrics offline', error: e, stackTrace: stackTrace);
+  }
+}
+
+Future<void> deleteStoredLyrics(String songId) async {
+  if (songId.isEmpty) return;
+
+  try {
+    final file = File(FilePaths.getLyricsPath(songId));
+    if (await file.exists()) await file.delete();
+  } catch (e, stackTrace) {
+    logger.log('Error deleting stored lyrics', error: e, stackTrace: stackTrace);
+  }
+}
+
+/// Fetches and stores lyrics for a downloaded song. Best effort: failures are
+/// logged and never block the download.
+Future<void> cacheLyricsForOfflineSong(Map song) async {
+  final songId = song['ytid']?.toString();
+  if (songId == null || songId.isEmpty) return;
+
+  final title = song['title']?.toString().trim() ?? '';
+  final artist = song['artist']?.toString().trim() ?? '';
+  if (title.isEmpty || artist.isEmpty) return;
+
+  try {
+    final existing = await readStoredLyrics(songId);
+    if (existing != null) return;
+
+    final durationSeconds = song['duration'];
+    final result = await LyricsManager().fetchLyrics(
+      artist,
+      title,
+      albumName: song['album']?.toString(),
+      duration: durationSeconds is num
+          ? Duration(seconds: durationSeconds.round())
+          : null,
+    );
+
+    if (result == null || result.isEmpty) return;
+    await writeStoredLyrics(songId, result);
+  } catch (e, stackTrace) {
+    logger.log(
+      'Error caching lyrics for offline song',
+      error: e,
+      stackTrace: stackTrace,
+    );
+  }
 }
 
 Future<bool> makeSongOffline(
@@ -1084,6 +1304,8 @@ Future<bool> makeSongOffline(
       );
     }
 
+    unawaited(cacheLyricsForOfflineSong(offlineSong));
+
     return true;
   } on SongOfflineRateLimited {
     rethrow;
@@ -1123,6 +1345,8 @@ Future<bool> removeSongFromOffline(dynamic songId) async {
         stackTrace: stackTrace,
       );
     }
+
+    await deleteStoredLyrics(songId.toString());
 
     try {
       userOfflineSongs.value = List.from(userOfflineSongs.value)

@@ -36,41 +36,35 @@ import 'package:wiyamusic/services/playlist_download_service.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
-import 'package:wiyamusic/services/update_manager.dart';
-import 'package:wiyamusic/theme/app_colors.dart';
+// Unused while manual/auto app-update settings are hidden from end users.
+// import 'package:wiyamusic/services/update_manager.dart';
+// Unused while the accent color picker is hidden from end users.
+// import 'package:wiyamusic/theme/app_colors.dart';
 import 'package:wiyamusic/theme/app_themes.dart';
 import 'package:wiyamusic/utilities/flutter_bottom_sheet.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/language_utils.dart';
-import 'package:wiyamusic/utilities/url_launcher.dart';
+// Unused while the "Translate" (Crowdin) link is hidden from end users.
+// import 'package:wiyamusic/utilities/url_launcher.dart';
 import 'package:wiyamusic/widgets/bottom_sheet_bar.dart';
 import 'package:wiyamusic/widgets/confirmation_dialog.dart';
 import 'package:wiyamusic/widgets/custom_bar.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
-import 'package:wiyamusic/widgets/section_header.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final primaryColor = Theme.of(context).colorScheme.primary;
-    final activatedColor = Theme.of(context).colorScheme.secondaryContainer;
-    final inactivatedColor = Theme.of(context).colorScheme.surfaceContainerHigh;
-
     return Scaffold(
-      appBar: AppBar(title: Text(context.l10n!.settings)),
+      // appBar: AppBar(title: Text(context.l10n!.settings)),
       body: SingleChildScrollView(
         padding: commonSingleChildScrollViewPadding,
         child: Column(
           children: <Widget>[
-            _buildPreferencesSection(
-              context,
-              primaryColor,
-              activatedColor,
-              inactivatedColor,
-            ),
+            _buildPreferencesSection(context),
             if (!offlineMode.value) _buildOnlineFeaturesSection(context),
+            _buildToolsSection(context),
             _buildOthersSection(context),
             const SizedBox(height: 20),
             const MiniPlayerBottomSpace(),
@@ -80,64 +74,77 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  Widget _buildPreferencesSection(
-    BuildContext context,
-    Color primaryColor,
-    Color activatedColor,
-    Color inactivatedColor,
-  ) {
-    final isOffline = offlineMode.value;
+  Widget _settingsSectionTitle(BuildContext context, String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          title,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreferencesSection(BuildContext context) {
+    final showPureBlack = themeMode == ThemeMode.dark;
 
     return Column(
       children: [
-        SectionHeader(
-          title: context.l10n!.preferences,
-          icon: FluentIcons.options_24_filled,
-        ),
-        CustomBar(
-          context.l10n!.accentColor,
-          FluentIcons.color_24_regular,
-          borderRadius: commonCustomBarRadiusFirst,
-          onTap: () => _showAccentColorPicker(context),
-        ),
+        _settingsSectionTitle(context, context.l10n!.preferences),
         CustomBar(
           context.l10n!.themeMode,
           FluentIcons.weather_sunny_28_regular,
+          borderRadius: commonCustomBarRadiusFirst,
           onTap: () => _showThemeModePicker(context),
         ),
         CustomBar(
           context.l10n!.language,
           FluentIcons.translate_24_regular,
+          showDivider: true,
           onTap: () => _showLanguagePicker(context),
         ),
         CustomBar(
           context.l10n!.audioQuality,
           FluentIcons.music_note_1_24_regular,
+          showDivider: true,
           onTap: () => _showAudioQualityPicker(context),
         ),
-        if (Platform.isAndroid)
+        if (audioHandler.isEqualizerSupported)
           CustomBar(
             context.l10n!.equalizer,
             FluentIcons.data_histogram_24_regular,
+            showDivider: true,
             onTap: () => context.push('/settings/equalizer'),
           ),
-        CustomBar(
-          context.l10n!.dynamicColor,
-          FluentIcons.toggle_left_24_regular,
-          trailing: Switch(
-            value: useSystemColor.value,
-            onChanged: (value) => _toggleSystemColor(context, value),
-          ),
-        ),
-        if (themeMode == ThemeMode.dark)
+        // CustomBar(
+        //   context.l10n!.dynamicColor,
+        //   FluentIcons.toggle_left_24_regular,
+        //   showDivider: true,
+        //   trailing: _SettingsSwitch(
+        //     value: useSystemColor.value,
+        //     onChanged: (value) => _toggleSystemColor(context, value),
+        //   ),
+        // ),
+        if (showPureBlack)
           CustomBar(
             context.l10n!.pureBlackTheme,
             FluentIcons.color_background_24_regular,
-            trailing: Switch(
+            showDivider: true,
+            trailing: _SettingsSwitch(
               value: usePureBlackColor.value,
               onChanged: (value) => _togglePureBlack(context, value),
             ),
           ),
+        // Hidden from most end users (power-user / niche settings):
+        // - Predictive back (Android gesture polish)
+        // - Use proxy (network troubleshooting)
+        /*
         if (Platform.isAndroid)
           ValueListenableBuilder<bool>(
             valueListenable: predictiveBack,
@@ -170,37 +177,39 @@ class SettingsPage extends StatelessWidget {
             );
           },
         ),
-        ValueListenableBuilder<bool>(
-          valueListenable: wrappedEnabled,
-          builder: (_, value, __) {
-            return CustomBar(
-              context.l10n!.listeningStats,
-              FluentIcons.clock_24_regular,
-              description: context.l10n!.listeningStatsDescription,
-              trailing: Switch(
-                value: value,
-                onChanged: (value) => _toggleWrapped(context, value),
-              ),
-            );
-          },
-        ),
-        ValueListenableBuilder<bool>(
-          valueListenable: offlineMode,
-          builder: (_, value, __) {
-            return CustomBar(
-              context.l10n!.offlineMode,
-              FluentIcons.cloud_off_24_regular,
-              description: context.l10n!.offlineModeDescription,
-              borderRadius: isOffline && (isFdroidBuild || !Platform.isAndroid)
-                  ? commonCustomBarRadiusLast
-                  : BorderRadius.zero,
-              trailing: Switch(
-                value: value,
-                onChanged: (value) => _toggleOfflineMode(context, value),
-              ),
-            );
-          },
-        ),
+        */
+        // ValueListenableBuilder<bool>(
+        //   valueListenable: wrappedEnabled,
+        //   builder: (_, value, __) {
+        //     return CustomBar(
+        //       context.l10n!.listeningStats,
+        //       FluentIcons.clock_24_regular,
+        //       description: context.l10n!.listeningStatsDescription,
+        //       trailing: Switch(
+        //         value: value,
+        //         onChanged: (value) => _toggleWrapped(context, value),
+        //       ),
+        //     );
+        //   },
+        // ),
+        // ValueListenableBuilder<bool>(
+        //   valueListenable: offlineMode,
+        //   builder: (_, value, __) {
+        //     return CustomBar(
+        //       context.l10n!.offlineMode,
+        //       FluentIcons.cloud_off_24_regular,
+        //       showDivider: true,
+        //       borderRadius: commonCustomBarRadiusLast,
+        //       trailing: _SettingsSwitch(
+        //         value: value,
+        //         onChanged: (value) => _toggleOfflineMode(context, value),
+        //       ),
+        //     );
+        //   },
+        // ),
+        // Automatic update checks hidden from most end users (niche, Android
+        // non-F-Droid only).
+        /*
         if (!isFdroidBuild && Platform.isAndroid)
           ValueListenableBuilder<bool?>(
             valueListenable: shouldWeCheckUpdates,
@@ -220,6 +229,7 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
+        */
       ],
     );
   }
@@ -227,6 +237,10 @@ class SettingsPage extends StatelessWidget {
   Widget _buildOnlineFeaturesSection(BuildContext context) {
     return Column(
       children: [
+        // Hidden from most end users (niche / privacy-adjacent):
+        // - SponsorBlock (skips sponsor segments; advanced)
+        // - External recommendations (sends data to external services)
+        /*
         ValueListenableBuilder<bool>(
           valueListenable: sponsorBlockSupport,
           builder: (_, value, __) {
@@ -241,14 +255,16 @@ class SettingsPage extends StatelessWidget {
             );
           },
         ),
+        */
+        const SizedBox(height: 12),
         ValueListenableBuilder<bool>(
           valueListenable: playNextSongAutomatically,
           builder: (_, value, __) {
             return CustomBar(
               context.l10n!.automaticSongPicker,
               FluentIcons.music_note_2_play_20_regular,
-              description: context.l10n!.automaticSongPickerDescription,
-              trailing: Switch(
+              borderRadius: commonCustomBarRadius,
+              trailing: _SettingsSwitch(
                 value: value,
                 onChanged: (value) {
                   _toggleAutoPlayNext(context, value);
@@ -258,6 +274,8 @@ class SettingsPage extends StatelessWidget {
             );
           },
         ),
+
+        /*
         ValueListenableBuilder<bool>(
           valueListenable: externalRecommendations,
           builder: (_, value, __) {
@@ -274,8 +292,7 @@ class SettingsPage extends StatelessWidget {
             );
           },
         ),
-
-        _buildToolsSection(context),
+        */
       ],
     );
   }
@@ -283,10 +300,7 @@ class SettingsPage extends StatelessWidget {
   Widget _buildToolsSection(BuildContext context) {
     return Column(
       children: [
-        SectionHeader(
-          title: context.l10n!.tools,
-          icon: FluentIcons.toolbox_24_filled,
-        ),
+        _settingsSectionTitle(context, context.l10n!.tools),
         CustomBar(
           context.l10n!.clearCache,
           FluentIcons.broom_24_regular,
@@ -302,6 +316,7 @@ class SettingsPage extends StatelessWidget {
         CustomBar(
           context.l10n!.clearSearchHistory,
           FluentIcons.history_24_regular,
+          showDivider: true,
           onTap: () => _showConfirmationDialog(
             context: context,
             confirmationMessage: context.l10n!.clearSearchHistoryQuestion,
@@ -315,6 +330,7 @@ class SettingsPage extends StatelessWidget {
         CustomBar(
           context.l10n!.clearRecentlyPlayed,
           FluentIcons.receipt_play_24_regular,
+          showDivider: true,
           onTap: () => _showConfirmationDialog(
             context: context,
             confirmationMessage: context.l10n!.clearRecentlyPlayedQuestion,
@@ -325,27 +341,28 @@ class SettingsPage extends StatelessWidget {
             },
           ),
         ),
-        CustomBar(
-          context.l10n!.clearListeningStats,
-          FluentIcons.clock_24_regular,
-          onTap: () => _showConfirmationDialog(
-            context: context,
-            confirmationMessage: context.l10n!.clearListeningStatsQuestion,
-            submitMessage: context.l10n!.delete,
-            isDangerous: true,
-            onSubmit: () async {
-              audioHandler.resetListeningStatsSession(flushStats: false);
-              await listeningStatsService.clearStats();
-              audioHandler.startListeningStatsSessionIfNeeded();
-              if (context.mounted) {
-                showToast(context, '${context.l10n!.listeningStatsCleared}!');
-              }
-            },
-          ),
-        ),
+        // CustomBar(
+        //   context.l10n!.clearListeningStats,
+        //   FluentIcons.clock_24_regular,
+        //   onTap: () => _showConfirmationDialog(
+        //     context: context,
+        //     confirmationMessage: context.l10n!.clearListeningStatsQuestion,
+        //     submitMessage: context.l10n!.delete,
+        //     isDangerous: true,
+        //     onSubmit: () async {
+        //       audioHandler.resetListeningStatsSession(flushStats: false);
+        //       await listeningStatsService.clearStats();
+        //       audioHandler.startListeningStatsSessionIfNeeded();
+        //       if (context.mounted) {
+        //         showToast(context, '${context.l10n!.listeningStatsCleared}!');
+        //       }
+        //     },
+        //   ),
+        // ),
         CustomBar(
           context.l10n!.deleteDownloads,
           FluentIcons.delete_24_regular,
+          showDivider: true,
           onTap: () => _showConfirmationDialog(
             context: context,
             confirmationMessage: context.l10n!.deleteDownloadsQuestion,
@@ -368,14 +385,14 @@ class SettingsPage extends StatelessWidget {
         CustomBar(
           context.l10n!.backupUserData,
           FluentIcons.cloud_sync_24_regular,
+          showDivider: true,
           onTap: () => _backupUserData(context),
         ),
         CustomBar(
           context.l10n!.restoreUserData,
           FluentIcons.cloud_add_24_regular,
-          borderRadius: (!isFdroidBuild && Platform.isAndroid)
-              ? BorderRadius.zero
-              : commonCustomBarRadiusLast,
+          showDivider: true,
+          borderRadius: commonCustomBarRadiusLast,
           onTap: () async {
             try {
               final result = await restoreData(context);
@@ -418,6 +435,8 @@ class SettingsPage extends StatelessWidget {
             }
           },
         ),
+        // Manual "Download app update" hidden from most end users.
+        /*
         if (!isFdroidBuild && Platform.isAndroid)
           CustomBar(
             context.l10n!.downloadAppUpdate,
@@ -425,6 +444,7 @@ class SettingsPage extends StatelessWidget {
             borderRadius: commonCustomBarRadiusLast,
             onTap: checkAppUpdates,
           ),
+        */
       ],
     );
   }
@@ -432,16 +452,17 @@ class SettingsPage extends StatelessWidget {
   Widget _buildOthersSection(BuildContext context) {
     return Column(
       children: [
-        SectionHeader(
-          title: context.l10n!.others,
-          icon: FluentIcons.more_circle_24_filled,
-        ),
-        CustomBar(
-          context.l10n!.licenses,
-          FluentIcons.document_24_regular,
-          borderRadius: commonCustomBarRadiusFirst,
-          onTap: () => NavigationManager.router.go('/settings/license'),
-        ),
+        _settingsSectionTitle(context, context.l10n!.others),
+        // CustomBar(
+        //   context.l10n!.licenses,
+        //   FluentIcons.document_24_regular,
+        //   borderRadius: commonCustomBarRadiusFirst,
+        //   onTap: () => NavigationManager.router.go('/settings/license'),
+        // ),
+        // Hidden from most end users (contributor / debugging tools):
+        // - Translate (Crowdin contributor link)
+        // - Copy logs (debugging)
+        /*
         CustomBar(
           context.l10n!.translate,
           FluentIcons.translate_24_regular,
@@ -454,16 +475,18 @@ class SettingsPage extends StatelessWidget {
           FluentIcons.error_circle_24_regular,
           onTap: () async => showToast(context, await logger.copyLogs(context)),
         ),
+        */
         CustomBar(
           context.l10n!.about,
           FluentIcons.book_information_24_regular,
-          borderRadius: commonCustomBarRadiusLast,
+          borderRadius: commonCustomBarRadius,
           onTap: () => NavigationManager.router.go('/settings/about'),
         ),
       ],
     );
   }
 
+  /*
   void _showAccentColorPicker(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -524,6 +547,7 @@ class SettingsPage extends StatelessWidget {
       ),
     );
   }
+  */
 
   void _showThemeModePicker(BuildContext context) {
     final availableModes = [ThemeMode.system, ThemeMode.light, ThemeMode.dark];
@@ -661,6 +685,9 @@ class SettingsPage extends StatelessWidget {
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
+  // Unused while these settings are hidden from most end users. Restore
+  // alongside their CustomBar rows in the sections above to re-enable.
+  /*
   void _togglePredictiveBack(BuildContext context, bool value) {
     addOrUpdateData<bool>('settings', 'predictiveBack', value);
     predictiveBack.value = value;
@@ -670,7 +697,9 @@ class SettingsPage extends StatelessWidget {
     WiyaMusic.updateAppState(context);
     showToast(context, context.l10n!.settingChangedMsg);
   }
+  */
 
+  /*
   Future<void> _toggleWrapped(BuildContext context, bool value) async {
     if (!value) {
       audioHandler.resetListeningStatsSession(
@@ -690,6 +719,7 @@ class SettingsPage extends StatelessWidget {
       showToast(context, context.l10n!.settingChangedMsg);
     }
   }
+  */
 
   void _toggleOfflineMode(BuildContext context, bool value) {
     addOrUpdateData<bool>('settings', 'offlineMode', value);
@@ -701,11 +731,13 @@ class SettingsPage extends StatelessWidget {
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
+  /*
   void _toggleSponsorBlock(BuildContext context, bool value) {
     addOrUpdateData<bool>('settings', 'sponsorBlockSupport', value);
     sponsorBlockSupport.value = value;
     showToast(context, context.l10n!.settingChangedMsg);
   }
+  */
 
   void _toggleAutoPlayNext(BuildContext context, bool value) {
     addOrUpdateData<bool>('settings', 'playNextSongAutomatically', value);
@@ -713,6 +745,7 @@ class SettingsPage extends StatelessWidget {
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
+  /*
   void _toggleAutomaticUpdateChecks(BuildContext context, bool value) {
     addOrUpdateData<bool>('settings', 'shouldWeCheckUpdates', value);
     shouldWeCheckUpdates.value = value;
@@ -724,6 +757,7 @@ class SettingsPage extends StatelessWidget {
     externalRecommendations.value = value;
     showToast(context, context.l10n!.settingChangedMsg);
   }
+  */
 
   void _showConfirmationDialog({
     required BuildContext context,
@@ -753,30 +787,35 @@ class SettingsPage extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     try {
-      await showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            icon: Icon(
-              FluentIcons.info_24_regular,
-              color: colorScheme.primary,
-              size: 32,
-            ),
-            content: Text(
-              context.l10n!.folderRestrictions,
-              style: TextStyle(color: colorScheme.onSurfaceVariant),
-              textAlign: TextAlign.center,
-            ),
-            actionsAlignment: MainAxisAlignment.center,
-            actions: <Widget>[
-              FilledButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(context.l10n!.understand),
+      // Android-only heads-up about scoped-storage folder limits.
+      if (Platform.isAndroid && context.mounted) {
+        await showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              icon: Icon(
+                FluentIcons.info_24_regular,
+                color: colorScheme.primary,
+                size: 32,
               ),
-            ],
-          );
-        },
-      );
+              content: Text(
+                context.l10n!.folderRestrictions,
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+                textAlign: TextAlign.center,
+              ),
+              actionsAlignment: MainAxisAlignment.center,
+              actions: <Widget>[
+                FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(context.l10n!.understand),
+                ),
+              ],
+            );
+          },
+        );
+      }
+
+      if (!context.mounted) return;
       final result = await backupData(context);
       if (context.mounted) {
         showToast(
@@ -795,5 +834,25 @@ class SettingsPage extends StatelessWidget {
         );
       }
     }
+  }
+}
+
+class _SettingsSwitch extends StatelessWidget {
+  const _SettingsSwitch({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.scale(
+      scale: 0.78,
+      alignment: Alignment.centerRight,
+      child: Switch(
+        value: value,
+        onChanged: onChanged,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
   }
 }

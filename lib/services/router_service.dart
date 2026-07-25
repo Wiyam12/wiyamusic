@@ -178,6 +178,7 @@ class NavigationManager {
                 pageBuilder: (context, state) => _pushPage(
                   child: PlaylistPage(
                     playlistId: state.pathParameters['playlistId'],
+                    playlistData: _extraAsMap(state.extra),
                   ),
                   state: state,
                 ),
@@ -228,6 +229,16 @@ class NavigationManager {
               );
             },
             routes: [
+              GoRoute(
+                path: 'playlist/:playlistId',
+                pageBuilder: (context, state) => _pushPage(
+                  child: PlaylistPage(
+                    playlistId: state.pathParameters['playlistId'],
+                    playlistData: _extraAsMap(state.extra),
+                  ),
+                  state: state,
+                ),
+              ),
               GoRoute(
                 path: 'artist/:artistId',
                 pageBuilder: (context, state) => _pushPage(
@@ -290,6 +301,16 @@ class NavigationManager {
                 path: 'radioStations',
                 pageBuilder: (context, state) =>
                     _pushPage(child: const RadioStationsPage(), state: state),
+              ),
+              GoRoute(
+                path: 'playlist/:playlistId',
+                pageBuilder: (context, state) => _pushPage(
+                  child: UserCreatedPlaylistPage(
+                    playlistId: state.pathParameters['playlistId'],
+                    playlistData: _extraAsMap(state.extra),
+                  ),
+                  state: state,
+                ),
               ),
               GoRoute(
                 path: 'folder/:folderId/:folderName',

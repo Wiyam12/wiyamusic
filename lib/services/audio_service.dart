@@ -21,20 +21,25 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
+import 'package:ios_audio_equalizer/ios_audio_equalizer.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:wiyamusic/constants/clients.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/models/equalizer_models.dart';
 import 'package:wiyamusic/models/position_data.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
+import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/listening_stats_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/connectivity_utils.dart';
 import 'package:wiyamusic/utilities/map_utils.dart';
 import 'package:wiyamusic/utilities/mediaitem.dart';
 import 'package:wiyamusic/utilities/queue_entry_utils.dart';
@@ -93,6 +98,9 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   int _currentLoadingTransitionId = -1;
   bool _isUpdatingState = false;
   bool _pendingPlaybackStateUpdate = false;
+
+  /// After stop/dismiss, ignore player events that would revive the session.
+  bool _mediaSessionDismissed = false;
   int _songTransitionCounter = 0;
 
   bool _completionEventPending = false;
@@ -123,6 +131,10 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   int _activePreloadCount = 0;
   final Set<String> _preloadingYtIds = <String>{};
   final Set<String> _preloadedYtIds = <String>{};
+  final math.Random _random = math.Random();
+  Map? _preparedGenreFallback;
+  String? _preparedGenreFallbackSeedId;
+  Future<void>? _genreFallbackPreparation;
 
   late final Stream<PositionData> _positionDataStream =
       Rx.combineLatest3<Duration, Duration, Duration?, PositionData>(
@@ -392,6 +404,9 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }
 
   Future<bool> _ensureEqualizerConfigured({bool force = false}) async {
+    if (Platform.isIOS) {
+      return IosAudioEqualizer.isSupported;
+    }
     if (!Platform.isAndroid || _androidEqualizer == null) return false;
     if (_equalizerInitialized) return true;
 
@@ -454,14 +469,37 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     }
   }
 
-  Future<AndroidEqualizerParameters?> getEqualizerParameters() async {
+  /// Equalizer is available on Android (ExoPlayer) and iOS (AVPlayer tap).
+  bool get isEqualizerSupported =>
+      (Platform.isAndroid && _androidEqualizer != null) ||
+      IosAudioEqualizer.isSupported;
+
+  Future<EqualizerParametersInfo?> getEqualizerParameters() async {
+    if (Platform.isIOS) {
+      return _getIosEqualizerParameters(restoreSettings: true);
+    }
+
     final equalizer = _androidEqualizer;
     if (equalizer == null) return null;
 
     final initialized = await _ensureEqualizerConfigured();
     if (!initialized) return null;
     try {
-      return await equalizer.parameters.timeout(const Duration(seconds: 2));
+      final params = await equalizer.parameters.timeout(
+        const Duration(seconds: 2),
+      );
+      return EqualizerParametersInfo(
+        minDecibels: params.minDecibels,
+        maxDecibels: params.maxDecibels,
+        bands: [
+          for (var i = 0; i < params.bands.length; i++)
+            EqualizerBandInfo(
+              index: i,
+              centerFrequency: params.bands[i].centerFrequency,
+              gain: params.bands[i].gain,
+            ),
+        ],
+      );
     } catch (e, stackTrace) {
       logger.log(
         'Failed to get equalizer parameters',
@@ -472,7 +510,85 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     }
   }
 
+  Future<EqualizerParametersInfo?> _getIosEqualizerParameters({
+    bool restoreSettings = false,
+  }) async {
+    try {
+      final raw = await IosAudioEqualizer.getParameters();
+      if (raw == null) return null;
+
+      final bandsRaw = raw['bands'];
+      final bands = <EqualizerBandInfo>[];
+      if (bandsRaw is List) {
+        for (final entry in bandsRaw) {
+          if (entry is! Map) continue;
+          final map = Map<String, dynamic>.from(entry);
+          bands.add(
+            EqualizerBandInfo(
+              index: (map['index'] as num?)?.toInt() ?? bands.length,
+              centerFrequency:
+                  (map['centerFrequency'] as num?)?.toDouble() ?? 0,
+              gain: (map['gain'] as num?)?.toDouble() ?? 0,
+            ),
+          );
+        }
+      }
+
+      final minDb = (raw['minDecibels'] as num?)?.toDouble() ?? -12;
+      final maxDb = (raw['maxDecibels'] as num?)?.toDouble() ?? 12;
+
+      if (restoreSettings) {
+        final savedGains = equalizerBandGains.value;
+        if (savedGains.isNotEmpty) {
+          final clamped = [
+            for (var i = 0; i < bands.length; i++)
+              (i < savedGains.length ? savedGains[i] : 0.0).clamp(minDb, maxDb),
+          ];
+          await IosAudioEqualizer.setBandGains(clamped);
+          for (var i = 0; i < bands.length; i++) {
+            bands[i] = EqualizerBandInfo(
+              index: bands[i].index,
+              centerFrequency: bands[i].centerFrequency,
+              gain: clamped[i],
+            );
+          }
+        }
+        await IosAudioEqualizer.setEnabled(equalizerEnabled.value);
+      }
+
+      return EqualizerParametersInfo(
+        minDecibels: minDb,
+        maxDecibels: maxDb,
+        bands: bands,
+      );
+    } catch (e, stackTrace) {
+      logger.log(
+        'Failed to get iOS equalizer parameters',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }
+  }
+
   Future<void> setEqualizerEnabled(bool enabled) async {
+    if (Platform.isIOS) {
+      try {
+        await IosAudioEqualizer.setEnabled(enabled);
+        equalizerEnabled.value = enabled;
+        unawaited(
+          addOrUpdateData<bool>('settings', 'equalizerEnabled', enabled),
+        );
+      } catch (e, stackTrace) {
+        logger.log(
+          'Failed to set iOS equalizer enabled state',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+      return;
+    }
+
     final equalizer = _androidEqualizer;
     if (equalizer == null) return;
 
@@ -492,6 +608,32 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> setEqualizerBandGain(int index, double gain) async {
+    if (Platform.isIOS) {
+      try {
+        await IosAudioEqualizer.setBandGain(index, gain);
+        final gains = List<double>.from(equalizerBandGains.value);
+        while (gains.length <= index) {
+          gains.add(0);
+        }
+        gains[index] = gain;
+        equalizerBandGains.value = gains;
+        unawaited(
+          addOrUpdateData<List<double>>(
+            'settings',
+            'equalizerBandGains',
+            gains,
+          ),
+        );
+      } catch (e, stackTrace) {
+        logger.log(
+          'Failed to set iOS equalizer band gain',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+      return;
+    }
+
     final equalizer = _androidEqualizer;
     if (equalizer == null) return;
 
@@ -522,6 +664,30 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> resetEqualizerBands() async {
+    if (Platform.isIOS) {
+      try {
+        await IosAudioEqualizer.resetBands();
+        final params = await IosAudioEqualizer.getParameters();
+        final bandCount = (params?['bands'] as List?)?.length ?? 5;
+        final gains = List<double>.filled(bandCount, 0);
+        equalizerBandGains.value = gains;
+        unawaited(
+          addOrUpdateData<List<double>>(
+            'settings',
+            'equalizerBandGains',
+            gains,
+          ),
+        );
+      } catch (e, stackTrace) {
+        logger.log(
+          'Failed to reset iOS equalizer bands',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+      return;
+    }
+
     final equalizer = _androidEqualizer;
     if (equalizer == null) return;
 
@@ -570,6 +736,29 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 
     try {
       final now = DateTime.now();
+
+      // After stop/dismiss, keep the session idle with no controls so the
+      // system media notification stays dismissed.
+      if (_mediaSessionDismissed ||
+          (_queueList.isEmpty && mediaItem.valueOrNull == null)) {
+        final currentState = playbackState.valueOrNull;
+        if (currentState == null ||
+            currentState.processingState != AudioProcessingState.idle ||
+            currentState.playing ||
+            currentState.controls.isNotEmpty) {
+          playbackState.add(
+            PlaybackState(
+              controls: const [],
+              systemActions: const {},
+              processingState: AudioProcessingState.idle,
+              playing: false,
+              updateTime: now,
+            ),
+          );
+        }
+        return;
+      }
+
       final currentPosition = audioPlayer.position;
       final isPlaying = audioPlayer.playing;
       final currentState = playbackState.valueOrNull;
@@ -739,52 +928,108 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     }
   }
 
-  Future<void> _backgroundAddSongsToQueue() async {
-    // Fire and forget - this runs as a background task without blocking playback
-    if (offlineMode.value) return;
+  Future<bool> _backgroundAddSongsToQueue() async {
+    if (!await _shouldAllowOnlinePlaybackSideEffects() ||
+        !audioPlayer.playing) {
+      return false;
+    }
 
-    // Use microtask to avoid blocking the current operation
-    unawaited(
-      Future.microtask(() async {
-        try {
-          // Only add songs if we're still playing
-          if (!audioPlayer.playing) {
-            return;
-          }
+    try {
+      final baseSong = _getCurrentSongForRecommendations();
+      if (baseSong == null) return false;
 
-          final baseSong = _getCurrentSongForRecommendations();
-          if (baseSong == null) {
-            return;
-          }
+      await getSimilarSong(baseSong['ytid']).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          logger.log('Background song fetch timed out');
+        },
+      );
 
-          // Fetch similar songs silently in the background
-          await getSimilarSong(baseSong['ytid']).timeout(
-            const Duration(seconds: 10),
-            onTimeout: () {
-              logger.log('Background song fetch timed out');
-            },
-          );
+      if (!audioPlayer.playing || nextRecommendedSong == null) return false;
 
-          // If we got a recommendation, add it to the queue
-          // But only if still playing (user might have paused during fetch)
-          if (!audioPlayer.playing) {
-            return;
-          }
+      final songToAdd = nextRecommendedSong as Map;
+      nextRecommendedSong = null;
+      await _insertRecommendedSong(songToAdd);
+      return true;
+    } catch (e, stackTrace) {
+      logger.log(
+        'Error in background song addition',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return false;
+    }
+  }
 
-          if (nextRecommendedSong != null) {
-            final songToAdd = nextRecommendedSong;
-            nextRecommendedSong = null;
-            await _insertRecommendedSong(songToAdd);
-          }
-        } catch (e, stackTrace) {
-          logger.log(
-            'Error in background song addition',
-            error: e,
-            stackTrace: stackTrace,
-          );
-        }
-      }),
+  bool? _cachedHasInternet;
+  DateTime? _internetCheckedAt;
+
+  /// Cached reachability probe so skip/preload paths don't DNS-lookup every time.
+  Future<bool> _hasInternetAccessCached({bool forceRefresh = false}) async {
+    final now = DateTime.now();
+    if (!forceRefresh &&
+        _cachedHasInternet != null &&
+        _internetCheckedAt != null &&
+        now.difference(_internetCheckedAt!) < const Duration(seconds: 5)) {
+      return _cachedHasInternet!;
+    }
+
+    _cachedHasInternet = await hasInternetAccess();
+    _internetCheckedAt = now;
+    return _cachedHasInternet!;
+  }
+
+  Future<bool> _canPlaySongWithoutNetwork(Map song) async {
+    final ytid = song['ytid']?.toString();
+    if (ytid == null || ytid.isEmpty) return false;
+    if (!isSongAlreadyOffline(ytid)) return false;
+
+    final offlineSong = getOfflineSongByYtid(ytid);
+    final path = await FilePaths.resolveExistingAudioPath(
+      ytid,
+      storedPath:
+          song['audioPath']?.toString() ?? offlineSong['audioPath']?.toString(),
     );
+    return path != null;
+  }
+
+  /// Next/previous index that can play without streaming.
+  ///
+  /// When [wrap] is true (repeat-all), searches the whole queue circularly.
+  Future<int?> _findOfflinePlayableIndex({
+    required int fromIndex,
+    required int direction,
+    bool wrap = false,
+  }) async {
+    if (_queueList.isEmpty) return null;
+
+    final length = _queueList.length;
+    for (var step = 1; step <= length; step++) {
+      final raw = fromIndex + (direction * step);
+      late final int candidate;
+      if (wrap) {
+        candidate = (raw % length + length) % length;
+      } else {
+        if (raw < 0 || raw >= length) return null;
+        candidate = raw;
+      }
+
+      if (await _canPlaySongWithoutNetwork(_queueList[candidate])) {
+        return candidate;
+      }
+
+      if (wrap && step == length) break;
+    }
+    return null;
+  }
+
+  /// Online preload / related-song fetches require real internet (and must not
+  /// run in offline mode).
+  Future<bool> _shouldAllowOnlinePlaybackSideEffects({
+    bool forceRefresh = false,
+  }) async {
+    if (offlineMode.value) return false;
+    return _hasInternetAccessCached(forceRefresh: forceRefresh);
   }
 
   Map? _getCurrentSongForRecommendations() {
@@ -848,7 +1093,10 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     }
   }
 
-  Future<void> _insertRecommendedSong(Map song) async {
+  Future<void> _insertRecommendedSong(
+    Map song, {
+    bool forcePlayAtEnd = false,
+  }) async {
     try {
       if (song['ytid'] == null || song['ytid'].toString().isEmpty) {
         logger.log('Invalid recommended song data for queue');
@@ -857,7 +1105,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 
       final insertIndex = _queueList.length;
       final shouldPlayInsertedSong =
-          playNextSongAutomatically.value &&
+          (playNextSongAutomatically.value || forcePlayAtEnd) &&
           !sleepTimerExpired &&
           _currentLoadingIndex == -1 &&
           audioPlayer.processingState == ProcessingState.completed &&
@@ -886,6 +1134,163 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         stackTrace: stackTrace,
       );
     }
+  }
+
+  String? _normalizedGenre(Map song) {
+    final rawGenre = song['genre'] ?? song['genres'] ?? song['category'];
+    if (rawGenre is Iterable) {
+      for (final value in rawGenre) {
+        final normalized = value.toString().trim();
+        if (normalized.isNotEmpty) return normalized;
+      }
+      return null;
+    }
+    final normalized = rawGenre?.toString().trim() ?? '';
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  String? _genreFromPlaylist(Map<dynamic, dynamic> playlist) {
+    final explicit = _normalizedGenre(playlist);
+    if (explicit != null) return explicit;
+
+    final searchable = [
+      playlist['title'],
+      playlist['description'],
+      playlist['subtitle'],
+    ].whereType<Object>().join(' ').toLowerCase();
+    const knownGenres = <String, String>{
+      'hip hop': 'Hip Hop',
+      'hip-hop': 'Hip Hop',
+      'r&b': 'R&B',
+      'rhythm and blues': 'R&B',
+      'electronic': 'Electronic',
+      'edm': 'Electronic',
+      'acoustic': 'Acoustic',
+      'rock': 'Rock',
+      'pop': 'Pop',
+      'jazz': 'Jazz',
+      'classical': 'Classical',
+      'country': 'Country',
+      'reggae': 'Reggae',
+      'metal': 'Metal',
+      'blues': 'Blues',
+      'folk': 'Folk',
+      'latin': 'Latin',
+      'opm': 'OPM',
+    };
+    for (final entry in knownGenres.entries) {
+      if (searchable.contains(entry.key)) return entry.value;
+    }
+    return null;
+  }
+
+  bool _hasSameGenre(Map song, String genre) {
+    final songGenre = _normalizedGenre(song);
+    return songGenre != null && songGenre.toLowerCase() == genre.toLowerCase();
+  }
+
+  Future<Map?> _selectGenreFallback(Map seedSong) async {
+    final genre = _normalizedGenre(seedSong);
+    final seedId = _songYtid(seedSong);
+    if (genre == null || seedId == null) return null;
+
+    final excludedIds = <String>{
+      seedId,
+      ..._queueList.map(_songYtid).whereType<String>(),
+    };
+
+    final offlineCandidates = userOfflineSongs.value
+        .whereType<Map>()
+        .where((song) => _hasSameGenre(song, genre))
+        .where((song) => !excludedIds.contains(_songYtid(song)))
+        .toList();
+    if (offlineCandidates.isNotEmpty) {
+      return cloneMap(
+        offlineCandidates[_random.nextInt(offlineCandidates.length)],
+      );
+    }
+
+    if (offlineMode.value) return null;
+
+    final onlineSongs = await fetchSongsList(
+      '$genre music',
+    ).timeout(const Duration(seconds: 12), onTimeout: () => const []);
+    final onlineCandidates = onlineSongs
+        .whereType<Map>()
+        .where((song) => !excludedIds.contains(_songYtid(song)))
+        .map((song) => {...song, 'genre': genre})
+        .toList();
+    if (onlineCandidates.isEmpty) return null;
+    return onlineCandidates[_random.nextInt(onlineCandidates.length)];
+  }
+
+  Future<void> _prepareGenreFallback() async {
+    if (!await _shouldAllowOnlinePlaybackSideEffects()) {
+      _preparedGenreFallback = null;
+      _preparedGenreFallbackSeedId = null;
+      return;
+    }
+
+    final seedSong = currentSong;
+    final seedId = seedSong == null ? null : _songYtid(seedSong);
+    if (seedSong == null ||
+        seedId == null ||
+        _normalizedGenre(seedSong) == null) {
+      _preparedGenreFallback = null;
+      _preparedGenreFallbackSeedId = null;
+      return;
+    }
+    if (_preparedGenreFallbackSeedId == seedId &&
+        (_preparedGenreFallback != null || _genreFallbackPreparation != null)) {
+      await (_genreFallbackPreparation ?? Future<void>.value());
+      return;
+    }
+
+    _preparedGenreFallback = null;
+    _preparedGenreFallbackSeedId = seedId;
+    final preparation = Future<void>(() async {
+      final candidate = await _selectGenreFallback(seedSong);
+      if (_preparedGenreFallbackSeedId != seedId) return;
+      _preparedGenreFallback = candidate;
+      if (candidate != null &&
+          await _shouldAllowOnlinePlaybackSideEffects()) {
+        await _preloadSingleSongControlled(candidate);
+      }
+    });
+    _genreFallbackPreparation = preparation;
+    await preparation.whenComplete(() {
+      if (identical(_genreFallbackPreparation, preparation)) {
+        _genreFallbackPreparation = null;
+      }
+    });
+  }
+
+  Future<void> _playGenreFallbackAtQueueEnd() async {
+    if (!await _shouldAllowOnlinePlaybackSideEffects()) return;
+    if (sleepTimerExpired ||
+        _currentLoadingIndex != -1 ||
+        _queueList.isEmpty ||
+        _currentQueueIndex != _queueList.length - 1) {
+      return;
+    }
+
+    final seedSong = currentSong;
+    final seedId = seedSong == null ? null : _songYtid(seedSong);
+    if (seedSong == null || seedId == null) return;
+
+    if (_preparedGenreFallbackSeedId != seedId) {
+      await _prepareGenreFallback();
+    } else if (_genreFallbackPreparation != null) {
+      await _genreFallbackPreparation;
+    }
+
+    final candidate =
+        _preparedGenreFallback ?? await _selectGenreFallback(seedSong);
+    _preparedGenreFallback = null;
+    _preparedGenreFallbackSeedId = null;
+    if (candidate == null) return;
+
+    await _insertRecommendedSong(candidate, forcePlayAtEnd: true);
   }
 
   void _cleanupOldPreloadedSongs() {
@@ -937,9 +1342,16 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       if (replace) {
         _queueList.clear();
         _originalQueueList.clear();
+        _preparedGenreFallback = null;
+        _preparedGenreFallbackSeedId = null;
         _currentQueueIndex = 0;
+        // Invalidate any in-flight queue load so its finally block does not
+        // clear a newer request, and release the pending lock so the next
+        // _playFromQueue can take over after a user tap.
+        _songTransitionCounter++;
         _currentLoadingIndex = -1;
         _currentLoadingTransitionId = -1;
+        _setPlayRequestPending(false);
         _resetPreloadingState();
         shuffleNotifier.value = false;
         unawaited(Hive.box('settings').put('shuffleEnabled', false));
@@ -1222,6 +1634,8 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       return;
     }
 
+    _mediaSessionDismissed = false;
+
     // Ignore duplicate taps for the same index while that load is in flight.
     if (_currentLoadingIndex == index && !_completionEventPending) {
       return;
@@ -1271,10 +1685,15 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       // Only process result if this is still the current transition
       if (currentTransitionId == _currentLoadingTransitionId) {
         if (success) {
-          _preloadUpcomingSongs();
-          // Trigger background song addition if auto-play is enabled
-          if (playNextSongAutomatically.value) {
-            unawaited(_backgroundAddSongsToQueue());
+          if (await _shouldAllowOnlinePlaybackSideEffects()) {
+            _preloadUpcomingSongs();
+            if (_currentQueueIndex == _queueList.length - 1) {
+              unawaited(_prepareGenreFallback());
+            }
+            // Trigger background song addition if auto-play is enabled
+            if (playNextSongAutomatically.value) {
+              unawaited(_backgroundAddSongsToQueue());
+            }
           }
         } else {
           _currentQueueIndex = previousQueueIndex;
@@ -1301,11 +1720,10 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }
 
   void _preloadUpcomingSongs() {
-    // Don't attempt to preload while offline mode is enabled
-    if (offlineMode.value) return;
-
     Future.microtask(() async {
       try {
+        if (!await _shouldAllowOnlinePlaybackSideEffects()) return;
+
         final songsToPreload = <Map>[];
 
         for (var i = 1; i <= _queueLookahead; i++) {
@@ -1358,9 +1776,8 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     String? preloadUrl;
 
     try {
-      // Don't attempt to fetch remote streams while offline mode is enabled
-      if (offlineMode.value) {
-        logger.log('Offline mode enabled; skipping preload for $ytid');
+      if (!await _shouldAllowOnlinePlaybackSideEffects()) {
+        logger.log('Skipping online preload for $ytid');
         preloadUrl = null;
       } else {
         // fetchSongStreamUrl handles caching, freshness checks, and validation
@@ -1637,6 +2054,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     final item = await getMediaItem(mediaId);
     if (item == null) return;
 
+    _mediaSessionDismissed = false;
     mediaItem.add(item);
     queue.add([item]);
     playbackState.add(
@@ -1681,7 +2099,14 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }
 
   @override
+  Future<void> onNotificationDeleted() async {
+    // Swipe-away of the system media notification (Android).
+    await stop();
+  }
+
+  @override
   Future<void> play() async {
+    _mediaSessionDismissed = false;
     try {
       // Ignore rapid Play taps while a stream request is already in flight.
       if (isPlayRequestPending.value) {
@@ -1735,41 +2160,68 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   Future<void> stop() async {
     _debounceTimer?.cancel();
     _completionEventPending = false;
+    _completionHandlerLoadStarted = false;
     _currentLoadingIndex = -1;
     _currentLoadingTransitionId = -1;
     _lastError = null;
     _setPlayRequestPending(false);
+    _preparedGenreFallback = null;
+    _preparedGenreFallbackSeedId = null;
+    _genreFallbackPreparation = null;
+    _mediaSessionDismissed = true;
+    _pendingPlaybackStateUpdate = false;
+
+    // Clear session first so player-stop events cannot revive the notification.
+    _queueList.clear();
+    _originalQueueList.clear();
+    _currentQueueIndex = 0;
+    _currentLoadingIndex = -1;
+    _currentLoadingTransitionId = -1;
+    _resetPreloadingState();
+    queue.add([]);
+    _queueMapStream.add(const []);
+    mediaItem.add(null);
+
+    // Drop to paused+non-idle first when needed so Android can leave the
+    // foreground service before we cancel the notification (required for
+    // androidStopForegroundOnPause + cancel to work on modern Android).
+    final wasPlaying =
+        playbackState.valueOrNull?.playing ?? audioPlayer.playing;
+    if (wasPlaying) {
+      playbackState.add(
+        PlaybackState(
+          controls: const [],
+          systemActions: const {},
+          processingState: AudioProcessingState.ready,
+          playing: false,
+        ),
+      );
+    }
+
+    playbackState.add(
+      PlaybackState(
+        controls: const [],
+        systemActions: const {},
+        processingState: AudioProcessingState.idle,
+        playing: false,
+      ),
+    );
+
     try {
       listeningStatsService.finishListeningSession(
         countCurrentTick: true,
         wasPlaying: audioPlayer.playing,
       );
       await audioPlayer.stop();
-      _resetPreloadingState();
     } catch (e, stackTrace) {
       logger.log('Error in stop()', error: e, stackTrace: stackTrace);
     }
+
     await super.stop();
   }
 
   /// Stops playback and clears the current media so the mini player hides.
-  Future<void> dismissPlayer() async {
-    try {
-      await stop();
-      _queueList.clear();
-      _originalQueueList.clear();
-      _currentQueueIndex = 0;
-      _currentLoadingIndex = -1;
-      _currentLoadingTransitionId = -1;
-      _resetPreloadingState();
-      queue.add([]);
-      _queueMapStream.add(const []);
-      mediaItem.add(null);
-      _updatePlaybackState();
-    } catch (e, stackTrace) {
-      logger.log('Error in dismissPlayer()', error: e, stackTrace: stackTrace);
-    }
-  }
+  Future<void> dismissPlayer() => stop();
 
   /// Returns unplayed manually added songs after the current queue index.
   List<Map> _getUnplayedManualSongs() {
@@ -1821,20 +2273,45 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   Future<bool> _resolveOfflineAndSetPaths(Map songData) async {
     try {
       final ytid = songData['ytid']?.toString();
-      if (ytid != null && ytid.isNotEmpty) {
-        final offlineSong = getOfflineSongByYtid(ytid);
-        if (offlineSong.isNotEmpty) {
-          final audioPath = offlineSong['audioPath']?.toString();
-          if (audioPath != null && audioPath.isNotEmpty) {
-            final f = File(audioPath);
-            if (await f.exists()) {
-              songData['audioPath'] = audioPath;
-              if (offlineSong['artworkPath'] != null) {
-                songData['artworkPath'] = offlineSong['artworkPath'];
-              }
-              return true;
-            }
+      if (ytid == null || ytid.isEmpty) return false;
+
+      final offlineSong = getOfflineSongByYtid(ytid);
+      final storedAudioPath =
+          offlineSong['audioPath']?.toString() ??
+          songData['audioPath']?.toString();
+
+      // Downloaded songs must resolve against the current app container path.
+      // Stale absolute paths (common on iOS after updates) previously made
+      // offline tracks look missing and forced a googlevideo stream fallback.
+      if (offlineSong.isNotEmpty ||
+          (storedAudioPath != null && storedAudioPath.isNotEmpty)) {
+        final audioPath = await FilePaths.resolveExistingAudioPath(
+          ytid,
+          storedPath: storedAudioPath,
+        );
+        if (audioPath != null) {
+          songData['audioPath'] = audioPath;
+
+          final artworkPath = await FilePaths.resolveExistingArtworkPath(
+            ytid,
+            storedPath:
+                offlineSong['artworkPath']?.toString() ??
+                songData['artworkPath']?.toString(),
+          );
+          if (artworkPath != null) {
+            songData['artworkPath'] = artworkPath;
           }
+
+          if (offlineSong.isNotEmpty) {
+            unawaited(
+              repairOfflineSongPathsForYtid(
+                ytid,
+                audioPath: audioPath,
+                artworkPath: artworkPath,
+              ),
+            );
+          }
+          return true;
         }
       }
     } catch (e, st) {
@@ -1845,16 +2322,6 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       );
     }
 
-    // Fallback: prefer an existing local `audioPath` on the passed song
-    // object if the file exists.
-    try {
-      final path = songData['audioPath']?.toString();
-      if (path != null && path.isNotEmpty) {
-        final f = File(path);
-        if (await f.exists()) return true;
-      }
-    } catch (_) {}
-
     return false;
   }
 
@@ -1864,13 +2331,10 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }
 
   Future<bool> playSong(Map song, {String? mediaId, int? transitionId}) async {
-    // Direct play calls (no queue transition) must not stack while another
-    // request is already resolving a stream.
+    // Direct play calls (no queue transition) own their transition lock.
+    // Always create a new transition so a user tap can supersede a slow
+    // in-flight resolve (no internet / slow CDN) instead of being ignored.
     final ownsRequestLock = transitionId == null;
-    if (ownsRequestLock && isPlayRequestPending.value) {
-      logger.log('Ignoring playSong; a playback request is already pending');
-      return false;
-    }
 
     if (ownsRequestLock) {
       _songTransitionCounter++;
@@ -1986,92 +2450,71 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 
   Future<_PlaybackSource?> _resolvePlaybackSource(Map songData) async {
     final isOffline = await _resolveOfflineAndSetPaths(songData);
-    final songUrl = await _getPlaybackUrl(songData, isOffline);
-
-    if (songUrl != null && songUrl.url.isNotEmpty) {
-      return _PlaybackSource(
-        songUrl: songUrl.url,
-        isOffline: isOffline,
-        headers: songUrl.headers,
-      );
-    }
+    final allowOnline = await _shouldAllowOnlinePlaybackSideEffects(
+      forceRefresh: true,
+    );
 
     if (isOffline) {
-      // If offline mode is enabled, do NOT fall back to online streams.
-      try {
-        if (offlineMode.value) {
-          logger.log(
-            'Offline mode enabled and offline file missing for ${songData['ytid']}. Not falling back to online.',
-          );
-          return null;
-        }
-      } catch (_) {
-        // If offlineMode isn't available for some reason, continue with fallback.
+      final path = await _getOfflineSongUrl(songData);
+      if (path != null && path.isNotEmpty) {
+        return _PlaybackSource(
+          songUrl: path,
+          isOffline: true,
+          headers: const {},
+        );
+      }
+
+      if (!allowOnline) {
+        logger.log(
+          'Offline file missing and no internet for ${songData['ytid']}',
+        );
+        return null;
       }
 
       logger.log(
         'Offline file missing for ${songData['ytid']}, switching to online',
       );
-
-      final online = await resolveSongStream(
-        songData['ytid'],
-        songData['isLive'] ?? false,
+    } else if (!allowOnline) {
+      logger.log(
+        'No local file and no internet for ${songData['ytid']}; skipping online stream',
       );
-
-      if (online == null || online.url.isEmpty) {
-        logger.log('Failed to get song URL for ${songData['ytid']}');
-        return null;
-      }
-
-      return _PlaybackSource(
-        songUrl: online.url,
-        isOffline: false,
-        headers: online.headers,
-      );
-    }
-
-    logger.log('Failed to get song URL for ${songData['ytid']}');
-    return null;
-  }
-
-  Future<ResolvedSongStream?> _getPlaybackUrl(Map song, bool isOffline) async {
-    if (isOffline) {
-      final path = await _getOfflineSongUrl(song);
-      if (path == null || path.isEmpty) return null;
-      return ResolvedSongStream(url: path, headers: const {});
-    }
-
-    return resolveSongStream(song['ytid'], song['isLive'] ?? false);
-  }
-
-  Future<String?> _getOfflineSongUrl(Map song) async {
-    final audioPath = song['audioPath'];
-    if (audioPath == null || audioPath.isEmpty) {
-      logger.log('Missing audioPath for offline song: ${song['ytid']}');
       return null;
     }
 
-    final file = File(audioPath);
-    if (await file.exists()) {
-      return audioPath;
-    }
-
-    logger.log('Offline audio file not found: $audioPath');
-
-    final offlineSong = userOfflineSongs.value.firstWhere(
-      (s) => s['ytid'] == song['ytid'],
-      orElse: () => <String, dynamic>{},
+    final online = await resolveSongStream(
+      songData['ytid'],
+      songData['isLive'] ?? false,
     );
 
-    if (offlineSong.isNotEmpty && offlineSong['audioPath'] != null) {
-      final fallbackPath = offlineSong['audioPath'];
-      final fallbackFile = File(fallbackPath);
-      if (await fallbackFile.exists()) {
-        song['audioPath'] = fallbackPath;
-        return fallbackPath;
-      }
+    if (online == null || online.url.isEmpty) {
+      logger.log('Failed to get song URL for ${songData['ytid']}');
+      return null;
     }
 
+    return _PlaybackSource(
+      songUrl: online.url,
+      isOffline: false,
+      headers: online.headers,
+    );
+  }
+
+  Future<String?> _getOfflineSongUrl(Map song) async {
+    final ytid = song['ytid']?.toString();
+    if (ytid == null || ytid.isEmpty) {
+      logger.log('Missing ytid for offline song');
+      return null;
+    }
+
+    final resolved = await FilePaths.resolveExistingAudioPath(
+      ytid,
+      storedPath: song['audioPath']?.toString(),
+    );
+    if (resolved != null) {
+      song['audioPath'] = resolved;
+      return resolved;
+    }
+
+    logger.log('Offline audio file not found for $ytid');
     return null;
   }
 
@@ -2139,7 +2582,9 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 
       _updatePlaybackState();
 
-      Future.delayed(const Duration(seconds: 2), _preloadUpcomingSongs);
+      if (!isOffline) {
+        Future.delayed(const Duration(seconds: 2), _preloadUpcomingSongs);
+      }
 
       return true;
     } catch (e, stackTrace) {
@@ -2152,12 +2597,9 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       if (isOffline) {
         // If offline mode is explicitly enabled, do not attempt any online
         // fallback — respect the user's offline-only preference.
-        try {
-          if (offlineMode.value) {
-            return false;
-          }
-        } catch (_) {
-          // If offlineMode isn't accessible, fallthrough to attempt fallback.
+        if (offlineMode.value ||
+            !await _shouldAllowOnlinePlaybackSideEffects(forceRefresh: true)) {
+          return false;
         }
 
         return _attemptOfflineFallback(
@@ -2171,7 +2613,8 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       // Does not skip to another song or loop.
       if (allowFreshUrlRetry &&
           !offlineMode.value &&
-          !_isStaleTransition(transitionId)) {
+          !_isStaleTransition(transitionId) &&
+          await _shouldAllowOnlinePlaybackSideEffects()) {
         final songId = song['ytid']?.toString();
         if (songId != null && songId.isNotEmpty) {
           final refreshed = await resolveSongStream(
@@ -2215,8 +2658,11 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     String? mediaId,
     int? transitionId,
   }) async {
-    // Do not attempt any network calls when offline mode is enabled.
-    if (offlineMode.value) return false;
+    // Do not attempt any network calls when offline mode is enabled or the
+    // device has no internet.
+    if (!await _shouldAllowOnlinePlaybackSideEffects(forceRefresh: true)) {
+      return false;
+    }
 
     final online = await resolveSongStream(
       song['ytid'],
@@ -2253,11 +2699,14 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }) async {
     try {
       if (playlist != null && playlist['list'] != null) {
-        await addPlaylistToQueue(
-          List<Map>.from(playlist['list']),
-          replace: true,
-          startIndex: songIndex,
-        );
+        final genre = _genreFromPlaylist(playlist);
+        final songs = List<Map>.from(playlist['list']).map((song) {
+          if (genre == null || genre.isEmpty || song['genre'] != null) {
+            return song;
+          }
+          return <dynamic, dynamic>{...song, 'genre': genre};
+        }).toList();
+        await addPlaylistToQueue(songs, replace: true, startIndex: songIndex);
       }
     } catch (e, stackTrace) {
       logger.log('Error playing playlist', error: e, stackTrace: stackTrace);
@@ -2481,15 +2930,40 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   @override
   Future<void> skipToNext() async {
     try {
+      final allowOnline = await _shouldAllowOnlinePlaybackSideEffects(
+        forceRefresh: true,
+      );
+      final wrap = repeatNotifier.value == AudioServiceRepeatMode.all;
+
+      if (!allowOnline) {
+        final nextOffline = await _findOfflinePlayableIndex(
+          fromIndex: _currentQueueIndex,
+          direction: 1,
+          wrap: wrap,
+        );
+        if (nextOffline != null) {
+          await _playFromQueue(nextOffline);
+        } else {
+          logger.log('No offline songs available to play next');
+        }
+        _cleanupOldPreloadedSongs();
+        return;
+      }
+
       if (_currentQueueIndex < _queueList.length - 1) {
         await _playFromQueue(_currentQueueIndex + 1);
-      } else if (repeatNotifier.value == AudioServiceRepeatMode.all &&
-          _queueList.isNotEmpty) {
+      } else if (wrap && _queueList.isNotEmpty) {
         await _playFromQueue(0);
       } else if (playNextSongAutomatically.value &&
           _currentLoadingIndex == -1) {
-        // At end of queue with auto-play enabled - trigger background fetch
-        unawaited(_backgroundAddSongsToQueue());
+        // Preserve the existing related-song autoplay first. If it cannot
+        // provide a song, continue with the prepared same-genre fallback.
+        final addedRelatedSong = await _backgroundAddSongsToQueue();
+        if (!addedRelatedSong) {
+          await _playGenreFallbackAtQueueEnd();
+        }
+      } else if (_currentLoadingIndex == -1) {
+        await _playGenreFallbackAtQueueEnd();
       }
 
       _cleanupOldPreloadedSongs();
@@ -2505,6 +2979,38 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   @override
   Future<void> skipToPrevious() async {
     try {
+      final allowOnline = await _shouldAllowOnlinePlaybackSideEffects(
+        forceRefresh: true,
+      );
+
+      if (!allowOnline) {
+        final previousOffline = await _findOfflinePlayableIndex(
+          fromIndex: _currentQueueIndex,
+          direction: -1,
+          wrap: repeatNotifier.value == AudioServiceRepeatMode.all,
+        );
+        if (previousOffline != null) {
+          await _playFromQueue(previousOffline);
+        } else if (_historyList.isNotEmpty) {
+          // Only restore history items that are playable offline.
+          for (var i = 0; i < _historyList.length; i++) {
+            final candidate = _historyList[i];
+            if (await _canPlaySongWithoutNetwork(candidate)) {
+              final song = cloneMap(_historyList.removeAt(i));
+              _queueList.insert(0, song);
+              _currentQueueIndex = 0;
+              _updateQueueMediaItems();
+              await _playFromQueue(0);
+              break;
+            }
+          }
+        } else {
+          logger.log('No offline songs available to play previous');
+        }
+        _cleanupOldPreloadedSongs();
+        return;
+      }
+
       if (_currentQueueIndex > 0) {
         await _playFromQueue(_currentQueueIndex - 1);
       } else if (_historyList.isNotEmpty) {

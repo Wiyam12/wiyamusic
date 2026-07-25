@@ -25,6 +25,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:wiyamusic/constants/app_constants.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/theme/design_tokens.dart';
@@ -163,6 +164,9 @@ ThemeData getAppTheme(ColorScheme colorScheme) {
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: true,
+      systemOverlayStyle: isLight
+          ? SystemUiOverlayStyle.dark
+          : SystemUiOverlayStyle.light,
       titleTextStyle: TextStyle(
         fontSize: 30,
         fontFamily: 'paytoneOne',

@@ -562,7 +562,39 @@ class PlaylistBar extends StatelessWidget {
         return;
       }
 
-      context.push('/home/playlist/$_resolvedPlaylistId');
+      final data = playlistData;
+      final isManualCustom =
+          (data != null && PlaylistUtils.isCustomPlaylist(data)) ||
+          (_resolvedPlaylistId?.startsWith('customId-') ?? false);
+
+      // Always pass playlist payload so PlaylistPage can render from local
+      // cache/metadata first instead of blocking on a network fetch.
+      final extra = data != null
+          ? Map<String, dynamic>.from(
+              data.map((key, value) => MapEntry(key.toString(), value)),
+            )
+          : <String, dynamic>{
+              'ytid': _resolvedPlaylistId,
+              'title': playlistTitle,
+              if (playlistArtwork != null) 'image': playlistArtwork,
+              if (isAlbum == true) 'isAlbum': true,
+            };
+
+      // Manually created playlists stay on the library stack via the
+      // folder-page module entry point. Remote/YouTube playlists use PlaylistPage.
+      if (isManualCustom) {
+        context.push(
+          '${NavigationManager.libraryPath}/playlist/$_resolvedPlaylistId',
+          extra: extra,
+        );
+        return;
+      }
+
+      final basePath = _routeBasePath(context);
+      context.push(
+        '$basePath/playlist/$_resolvedPlaylistId',
+        extra: extra,
+      );
     };
   }
 

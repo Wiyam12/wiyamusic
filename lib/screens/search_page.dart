@@ -43,6 +43,7 @@ import 'package:wiyamusic/widgets/artist_bar.dart';
 import 'package:wiyamusic/widgets/custom_search_bar.dart';
 import 'package:wiyamusic/widgets/home/home_section_header.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
+import 'package:wiyamusic/widgets/pinned_sliver_header.dart';
 import 'package:wiyamusic/widgets/playlist_bar.dart';
 import 'package:wiyamusic/widgets/radio_station_card.dart';
 import 'package:wiyamusic/widgets/search/search_discovery.dart';
@@ -283,87 +284,99 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
+    final topInset = MediaQuery.paddingOf(context).top;
+    // CustomSearchBar: vertical padding 16*2 + SearchBar minHeight 45.
+    const searchBarBodyHeight = 77.0;
+    final stickyHeight = topInset + searchBarBodyHeight;
+
     return Scaffold(
-      body: SingleChildScrollView(
-        padding: commonSingleChildScrollViewPadding,
+      body: CustomScrollView(
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        child: Column(
-          children: <Widget>[
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final isWide = constraints.maxWidth > 600;
-                final bar = ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: isWide ? 600 : double.infinity,
-                  ),
-                  child: CustomSearchBar(
-                    loadingProgressNotifier: _fetchingSongs,
-                    controller: _searchBar,
-                    focusNode: _inputNode,
-                    labelText: 'Search songs, artists, albums...',
-                    onChanged: (value) {
-                      _debounce?.cancel();
-                      final query = value;
-                      final requestId = ++_latestSuggestionRequest;
+        slivers: [
+          PinnedSliverHeader(
+            height: stickyHeight,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(10, topInset, 10, 0),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth > 600;
+                  final bar = ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: isWide ? 600 : double.infinity,
+                    ),
+                    child: CustomSearchBar(
+                      loadingProgressNotifier: _fetchingSongs,
+                      controller: _searchBar,
+                      focusNode: _inputNode,
+                      labelText: 'Search songs, artists, albums...',
+                      onChanged: (value) {
+                        _debounce?.cancel();
+                        final query = value;
+                        final requestId = ++_latestSuggestionRequest;
 
-                      if (query.isEmpty) {
-                        _resetToDiscovery();
-                        return;
-                      }
+                        if (query.isEmpty) {
+                          _resetToDiscovery();
+                          return;
+                        }
 
-                      // Typing a new query leaves previous results behind.
-                      if (_hasSearchResults) {
-                        _songsSearchResult = [];
-                        _artistsSearchResult = [];
-                        _albumsSearchResult = [];
-                        _playlistsSearchResult = [];
-                        _radioStationsSearchResult = [];
-                        if (mounted) setState(() {});
-                      }
-
-                      _debounce = Timer(
-                        const Duration(milliseconds: 300),
-                        () async {
-                          final searchSuggestions = await getSearchSuggestions(
-                            query,
-                          );
-
-                          if (!mounted ||
-                              requestId != _latestSuggestionRequest ||
-                              _searchBar.text != query) {
-                            return;
-                          }
-
-                          _suggestionsList = List<String>.from(
-                            searchSuggestions,
-                          );
+                        // Typing a new query leaves previous results behind.
+                        if (_hasSearchResults) {
+                          _songsSearchResult = [];
+                          _artistsSearchResult = [];
+                          _albumsSearchResult = [];
+                          _playlistsSearchResult = [];
+                          _radioStationsSearchResult = [];
                           if (mounted) setState(() {});
-                        },
-                      );
-                    },
-                    onSubmitted: (String value) {
-                      _submitSearch();
-                    },
-                  ),
-                );
-                if (isWide) {
-                  return Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [bar],
+                        }
+
+                        _debounce = Timer(
+                          const Duration(milliseconds: 300),
+                          () async {
+                            final searchSuggestions =
+                                await getSearchSuggestions(query);
+
+                            if (!mounted ||
+                                requestId != _latestSuggestionRequest ||
+                                _searchBar.text != query) {
+                              return;
+                            }
+
+                            _suggestionsList = List<String>.from(
+                              searchSuggestions,
+                            );
+                            if (mounted) setState(() {});
+                          },
+                        );
+                      },
+                      onSubmitted: (String value) {
+                        _submitSearch();
+                      },
+                    ),
                   );
-                }
-                return bar;
-              },
+                  if (isWide) {
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [bar],
+                    );
+                  }
+                  return bar;
+                },
+              ),
             ),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeIn,
-              child: _buildBelowSearchBar(context, primaryColor),
+          ),
+          SliverPadding(
+            padding: commonSingleChildScrollViewPadding,
+            sliver: SliverToBoxAdapter(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                child: _buildBelowSearchBar(context, primaryColor),
+              ),
             ),
-            const MiniPlayerBottomSpace(),
-          ],
-        ),
+          ),
+          const SliverMiniPlayerBottomSpace(),
+        ],
       ),
     );
   }

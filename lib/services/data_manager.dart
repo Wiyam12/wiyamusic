@@ -19,6 +19,7 @@
  *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -30,6 +31,9 @@ import 'package:wiyamusic/main.dart' show logger;
 // Cache durations for different types of data
 const Duration songCacheDuration = Duration(hours: 1, minutes: 30);
 const Duration playlistCacheDuration = Duration(hours: 5);
+/// Saved playlists/albums/artists are local-first and remain available until
+/// the user explicitly clears the cache.
+const Duration likedPlaylistCacheDuration = Duration(days: 3650);
 const Duration searchCacheDuration = Duration(days: 4);
 const Duration defaultCacheDuration = Duration(days: 7);
 
@@ -197,7 +201,12 @@ bool isCacheValid(Box box, String key, Duration cachingDuration) {
 Duration _getCacheDurationForKey(String key) {
   if (key.startsWith('song_') || key.contains('manifest_')) {
     return songCacheDuration;
-  } else if (key.startsWith('playlist_') || key.contains('playlistSongs')) {
+  } else if (key.startsWith('playlistInfo') ||
+      key.startsWith('playlistSongs') ||
+      key.contains('playlistSongs')) {
+    // Liked/saved playlist payloads should survive longer than generic cache.
+    return likedPlaylistCacheDuration;
+  } else if (key.startsWith('playlist_')) {
     return playlistCacheDuration;
   } else if (key.startsWith('search_')) {
     return searchCacheDuration;
@@ -213,68 +222,100 @@ Future<Box> _openBox(String category) async {
   }
 }
 
+const _backupFormatVersion = 1;
+const _backupBoxNames = ['user', 'settings'];
+
+/// Converts Hive values into JSON-encodable structures.
+dynamic _toJsonSafe(dynamic value) {
+  if (value == null || value is num || value is String || value is bool) {
+    return value;
+  }
+  if (value is DateTime) return value.toIso8601String();
+  if (value is List) return value.map(_toJsonSafe).toList();
+  if (value is Map) {
+    return {
+      for (final entry in value.entries)
+        entry.key.toString(): _toJsonSafe(entry.value),
+    };
+  }
+  return value.toString();
+}
+
+Map<String, dynamic> _boxToJsonMap(Box box) {
+  final data = <String, dynamic>{};
+  for (final key in box.keys) {
+    data[key.toString()] = _toJsonSafe(box.get(key));
+  }
+  return data;
+}
+
+Future<Map<String, dynamic>> _buildBackupPayload() async {
+  final boxes = <String, dynamic>{};
+  for (final boxName in _backupBoxNames) {
+    final box = await _openBox(boxName);
+    try {
+      await box.compact();
+    } catch (e, stackTrace) {
+      logger.log(
+        'Failed to compact box $boxName before backup',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+    boxes[boxName] = _boxToJsonMap(box);
+  }
+
+  return {
+    'formatVersion': _backupFormatVersion,
+    'createdAt': DateTime.now().toUtc().toIso8601String(),
+    'boxes': boxes,
+  };
+}
+
+Future<void> _restoreBoxesFromJson(Map<String, dynamic> boxesJson) async {
+  for (final boxName in _backupBoxNames) {
+    final raw = boxesJson[boxName];
+    if (raw is! Map) continue;
+
+    final box = await _openBox(boxName);
+    await box.clear();
+    for (final entry in raw.entries) {
+      await box.put(entry.key.toString(), entry.value);
+    }
+  }
+}
+
 Future<({String message, bool success})> backupData(
   BuildContext context,
 ) async {
-  final boxNames = ['user', 'settings'];
   final dlPath = await FilePicker.getDirectoryPath();
 
   if (dlPath == null) {
     return (message: '${context.l10n!.chooseBackupDir}!', success: false);
   }
 
-  if (!dlPath.contains('Documents') && !dlPath.contains('Download')) {
-    return (message: context.l10n!.folderRestrictions, success: false);
+  // Android scoped storage: writing outside Downloads/Documents often fails.
+  // Skip this check on iOS/macOS/desktop where the user can pick any folder.
+  if (Platform.isAndroid) {
+    final normalized = dlPath.toLowerCase();
+    final isAllowedFolder =
+        normalized.contains('document') || normalized.contains('download');
+    if (!isAllowedFolder) {
+      return (message: context.l10n!.folderRestrictions, success: false);
+    }
   }
 
   try {
-    for (final boxName in boxNames) {
-      final box = await _openBox(boxName);
-
-      if (box.path == null) {
-        logger.log('Box path is null for $boxName');
-        continue;
-      }
-
-      final sourceFile = File(box.path!);
-      final targetFile = File('$dlPath/$boxName.hive');
-
-      // Ensure the target directory exists
-      await targetFile.parent.create(recursive: true);
-
-      // Safely handle existing backup file
-      if (await targetFile.exists()) {
-        try {
-          await targetFile.delete();
-        } catch (e) {
-          // If delete fails, try with a timestamp suffix
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          final newTargetFile = File('$dlPath/${boxName}_$timestamp.hive');
-          await sourceFile.copy(newTargetFile.path);
-          continue;
-        }
-      }
-
-      // Compact the box before copying
-      try {
-        await box.compact();
-      } catch (e, stackTrace) {
-        logger.log(
-          'Failed to compact box $boxName',
-          error: e,
-          stackTrace: stackTrace,
-        );
-      }
-
-      // Copy the box file to backup location
-      if (await sourceFile.exists()) {
-        await sourceFile.copy(targetFile.path);
-      } else {
-        logger.log(
-          'Source file does not exist for $boxName at ${sourceFile.path}',
-        );
-      }
-    }
+    final payload = await _buildBackupPayload();
+    final stamp = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .replaceAll('.', '-');
+    final targetFile = File('$dlPath/wiyamusic_backup_$stamp.json');
+    await targetFile.parent.create(recursive: true);
+    await targetFile.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(payload),
+    );
 
     return (message: '${context.l10n!.backedupSuccess}!', success: true);
   } catch (e, stackTrace) {
@@ -286,110 +327,137 @@ Future<({String message, bool success})> backupData(
 Future<({String message, bool success})> restoreData(
   BuildContext context,
 ) async {
-  final boxNames = ['user', 'settings'];
-  final result = await FilePicker.pickFiles(allowMultiple: true);
+  final result = await FilePicker.pickFiles(
+    allowMultiple: true,
+    type: FileType.custom,
+    allowedExtensions: const ['json', 'hive'],
+  );
 
   if (result == null || result.files.isEmpty) {
     return (message: '${context.l10n!.chooseBackupFiles}!', success: false);
   }
 
   try {
-    // Close all boxes before restoring to avoid conflicts
-    for (final boxName in boxNames) {
-      if (Hive.isBoxOpen(boxName)) {
-        try {
-          await Hive.box(boxName).close();
-        } catch (e, stackTrace) {
-          logger.log(
-            'Failed to close box $boxName',
-            error: e,
-            stackTrace: stackTrace,
-          );
-        }
+    final jsonBackup = result.files.where((file) {
+      final name = file.name.toLowerCase();
+      return name.endsWith('.json') && file.path != null;
+    }).firstOrNull;
+
+    if (jsonBackup?.path != null) {
+      final content = await File(jsonBackup!.path!).readAsString();
+      final decoded = jsonDecode(content);
+      if (decoded is! Map) {
+        return (message: '${context.l10n!.restoreError}', success: false);
       }
+
+      final boxes = decoded['boxes'];
+      if (boxes is! Map) {
+        return (message: '${context.l10n!.restoreError}', success: false);
+      }
+
+      await _restoreBoxesFromJson(
+        Map<String, dynamic>.from(
+          boxes.map((key, value) => MapEntry(key.toString(), value)),
+        ),
+      );
+      return (message: '${context.l10n!.restoredSuccess}!', success: true);
     }
 
-    // Small delay to ensure boxes are properly closed
-    await Future.delayed(const Duration(milliseconds: 100));
+    // Legacy restore: separate user.hive / settings.hive copies.
+    return _restoreLegacyHiveFiles(context, result.files);
+  } catch (e, stackTrace) {
+    logger.log('Restore error', error: e, stackTrace: stackTrace);
+    return (message: '${context.l10n!.restoreError}: $e', success: false);
+  }
+}
 
-    for (final boxName in boxNames) {
-      final backupFile = result.files
-          .where(
-            (file) =>
-                file.name == '$boxName.hive' ||
-                file.name.startsWith('${boxName}_'),
-          )
-          .firstOrNull;
-
-      if (backupFile?.path != null) {
-        final sourceFile = File(backupFile!.path!);
-
-        if (await sourceFile.exists()) {
-          try {
-            // Get the original box path by temporarily opening the box
-            final tempBox = await Hive.openBox(boxName);
-            final boxPath = tempBox.path;
-            await tempBox.close();
-
-            if (boxPath != null) {
-              final targetFile = File(boxPath);
-
-              // Ensure target directory exists
-              await targetFile.parent.create(recursive: true);
-
-              // Delete existing file if it exists
-              if (await targetFile.exists()) {
-                try {
-                  await targetFile.delete();
-                } catch (e, stackTrace) {
-                  logger.log(
-                    'Failed to delete existing file',
-                    error: e,
-                    stackTrace: stackTrace,
-                  );
-                }
-              }
-
-              // Copy backup file to original location
-              await sourceFile.copy(targetFile.path);
-              logger.log(
-                'Restored $boxName from ${sourceFile.path} to ${targetFile.path}',
-              );
-            }
-          } catch (e, stackTrace) {
-            logger.log(
-              'Failed to restore $boxName',
-              error: e,
-              stackTrace: stackTrace,
-            );
-          }
-        } else {
-          logger.log('Backup file does not exist: ${sourceFile.path}');
-        }
-      } else {
-        logger.log('Backup file for $boxName not found in selection');
-      }
-    }
-
-    // Small delay before reopening boxes
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    // Reopen boxes after restore
-    for (final boxName in boxNames) {
+Future<({String message, bool success})> _restoreLegacyHiveFiles(
+  BuildContext context,
+  List<PlatformFile> files,
+) async {
+  for (final boxName in _backupBoxNames) {
+    if (Hive.isBoxOpen(boxName)) {
       try {
-        await _openBox(boxName);
+        await Hive.box(boxName).close();
       } catch (e, stackTrace) {
         logger.log(
-          'Failed to reopen box $boxName',
+          'Failed to close box $boxName',
           error: e,
           stackTrace: stackTrace,
         );
       }
     }
-
-    return (message: '${context.l10n!.restoredSuccess}!', success: true);
-  } catch (e, stackTrace) {
-    logger.log('Restore error', error: e, stackTrace: stackTrace);
-    return (message: '${context.l10n!.restoreError}: $e', success: false);
   }
+
+  await Future.delayed(const Duration(milliseconds: 100));
+
+  for (final boxName in _backupBoxNames) {
+    final backupFile = files
+        .where(
+          (file) =>
+              file.name == '$boxName.hive' ||
+              file.name.startsWith('${boxName}_'),
+        )
+        .firstOrNull;
+
+    if (backupFile?.path == null) {
+      logger.log('Backup file for $boxName not found in selection');
+      continue;
+    }
+
+    final sourceFile = File(backupFile!.path!);
+    if (!await sourceFile.exists()) {
+      logger.log('Backup file does not exist: ${sourceFile.path}');
+      continue;
+    }
+
+    try {
+      final tempBox = await Hive.openBox(boxName);
+      final boxPath = tempBox.path;
+      await tempBox.close();
+
+      if (boxPath == null) continue;
+
+      final targetFile = File(boxPath);
+      await targetFile.parent.create(recursive: true);
+      if (await targetFile.exists()) {
+        try {
+          await targetFile.delete();
+        } catch (e, stackTrace) {
+          logger.log(
+            'Failed to delete existing file',
+            error: e,
+            stackTrace: stackTrace,
+          );
+        }
+      }
+
+      await sourceFile.copy(targetFile.path);
+      logger.log(
+        'Restored $boxName from ${sourceFile.path} to ${targetFile.path}',
+      );
+    } catch (e, stackTrace) {
+      logger.log(
+        'Failed to restore $boxName',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  await Future.delayed(const Duration(milliseconds: 100));
+
+  for (final boxName in _backupBoxNames) {
+    try {
+      await _openBox(boxName);
+    } catch (e, stackTrace) {
+      logger.log(
+        'Failed to reopen box $boxName',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  return (message: '${context.l10n!.restoredSuccess}!', success: true);
 }

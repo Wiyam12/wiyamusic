@@ -28,7 +28,7 @@ import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/playlist_image_picker.dart';
 import 'package:wiyamusic/widgets/dialog_item.dart';
 
-void showCreatePlaylistDialog(
+Future<Map<String, String>?> showCreatePlaylistDialog(
   BuildContext context, {
   dynamic songToAdd,
   List<dynamic>? songsToAdd,
@@ -39,7 +39,7 @@ void showCreatePlaylistDialog(
   String? imageUrl;
   String? imageBase64;
 
-  showModalBottomSheet<void>(
+  return showModalBottomSheet<Map<String, String>?>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
@@ -77,7 +77,7 @@ void showCreatePlaylistDialog(
               final result = await addUserPlaylist(id, context);
               if (context.mounted) showToast(context, result);
               if (!context.mounted) return;
-              Navigator.pop(context);
+              Navigator.pop(context, {'type': 'youtube', 'id': id});
             } else if (!isYouTubeMode && customPlaylistName.isNotEmpty) {
               final (result, newPlaylistId) = createCustomPlaylist(
                 customPlaylistName.trim(),
@@ -106,7 +106,10 @@ void showCreatePlaylistDialog(
                 if (context.mounted) showToast(context, result);
               }
               if (!context.mounted) return;
-              Navigator.pop(context);
+              Navigator.pop(context, {
+                'type': 'custom',
+                'id': newPlaylistId,
+              });
             } else {
               showToast(
                 context,

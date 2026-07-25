@@ -60,22 +60,35 @@ class _ArtistPageState extends State<ArtistPage> {
 
   Future<Map<String, dynamic>?> _loadArtist() async {
     final artistData = widget.artistData;
-    try {
-      if (offlineMode.value) {
-        final offlineArtist = await getPlaylistInfoForWidget(
-          widget.artistId,
-          isArtist: true,
-          artistName: artistData?['title']?.toString(),
-          artistImage: artistData?['image']?.toString(),
-          sourceSongId: artistData?['sourceSongId']?.toString(),
-          sourceVideoAuthor: artistData?['videoAuthor']?.toString(),
-          preferredVerified: artistData?['isVerifiedArtist'] == true,
-        );
-        if (offlineArtist != null) {
-          return Map<String, dynamic>.from(offlineArtist);
-        }
-      }
 
+    // Local-first: prefer a downloaded copy or a cached artist catalog so
+    // liked artists still open when the network fetch fails.
+    final localArtist = await getPlaylistInfoForWidget(
+      widget.artistId,
+      isArtist: true,
+      artistName: artistData?['title']?.toString(),
+      artistImage: artistData?['image']?.toString(),
+      sourceSongId: artistData?['sourceSongId']?.toString(),
+      sourceVideoAuthor: artistData?['videoAuthor']?.toString(),
+      preferredVerified: artistData?['isVerifiedArtist'] == true,
+      localOnly: true,
+    );
+    final localList = localArtist?['list'];
+    final hasLocalCatalog = localList is List && localList.isNotEmpty;
+
+    if (hasLocalCatalog) {
+      return Map<String, dynamic>.from(localArtist!);
+    }
+
+    if (offlineMode.value) {
+      if (localArtist != null) {
+        return Map<String, dynamic>.from(localArtist);
+      }
+      _logNotFound(reason: 'offline with no cached artist');
+      return null;
+    }
+
+    try {
       final artist = await resolveArtist(
         widget.artistId,
         preferredName: artistData?['title']?.toString(),
@@ -85,6 +98,9 @@ class _ArtistPageState extends State<ArtistPage> {
         preferredVerified: artistData?['isVerifiedArtist'] == true,
       );
       if (artist == null) {
+        if (localArtist != null) {
+          return Map<String, dynamic>.from(localArtist);
+        }
         _logNotFound();
         return null;
       }
@@ -106,6 +122,10 @@ class _ArtistPageState extends State<ArtistPage> {
         error: e,
         stackTrace: stackTrace,
       );
+      // Network failed — fall back to any cached catalog before giving up.
+      if (localArtist != null) {
+        return Map<String, dynamic>.from(localArtist);
+      }
       _logNotFound(reason: 'artist load failed');
       return null;
     }

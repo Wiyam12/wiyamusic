@@ -1,0 +1,14 @@
+# flutter pub run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/wiyamusic_icon.png"
+  adaptive_icon_background: "#020617"
+  adaptive_icon_foreground: "assets/icons/wiyamusic_icon.png"
+  remove_alpha_ios: true
+  web:
+    generate: false
+  windows:
+    generate: false
+  macos:
+    generate: false

@@ -19,8 +19,6 @@
  *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
-import 'dart:ui';
-
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
@@ -152,30 +150,34 @@ class _HeroCard extends StatelessWidget {
         borderRadius: WiyaDesign.borderRadius,
         child: Ink(
           decoration: BoxDecoration(
+            color: Colors.transparent,
             borderRadius: WiyaDesign.borderRadius,
-            boxShadow: WiyaDesign.softGlow(
+            border: Border.all(
               color: colorScheme.primary,
-              blur: 28,
+              width: 1.5,
             ),
           ),
           child: ClipRRect(
-            borderRadius: WiyaDesign.borderRadius,
+            borderRadius: BorderRadius.circular(
+              WiyaDesign.cornerRadius - 1.5,
+            ),
             child: Stack(
               fit: StackFit.expand,
               children: [
                 _HeroArtwork(imageUrl: image),
-                DecoratedBox(
+                // Soft bottom fade for text readability only — no filled card bg.
+                const DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        WiyaDesign.background.withValues(alpha: 0.15),
-                        WiyaDesign.background.withValues(alpha: 0.35),
-                        WiyaDesign.primaryDeep.withValues(alpha: 0.55),
-                        WiyaDesign.background.withValues(alpha: 0.92),
+                        Colors.transparent,
+                        Colors.transparent,
+                        Color(0x99050B1B),
+                        Color(0xE6050B1B),
                       ],
-                      stops: const [0, 0.35, 0.7, 1],
+                      stops: [0, 0.4, 0.72, 1],
                     ),
                   ),
                 ),
@@ -183,89 +185,64 @@ class _HeroCard extends StatelessWidget {
                   left: 18,
                   right: 18,
                   bottom: 18,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(
-                      WiyaDesign.cornerRadiusMedium,
-                    ),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(
-                        sigmaX: WiyaDesign.blurSigma * 0.35,
-                        sigmaY: WiyaDesign.blurSigma * 0.35,
-                      ),
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(
-                            WiyaDesign.cornerRadiusMedium,
-                          ),
-                          border: Border.all(
-                            color: WiyaDesign.primaryBright.withValues(
-                              alpha: 0.22,
-                            ),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              typeLabel ?? 'DISCOVER',
-                              style: const TextStyle(
-                                color: WiyaDesign.primaryBright,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.4,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 26,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.4,
-                                height: 1.1,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              isAlbum
-                                  ? (context.l10n?.album ?? 'Album')
-                                  : (context.l10n?.suggestedPlaylists ??
-                                        'Suggested playlists'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.72),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _PlayNowButton(
-                                    label: context.l10n?.play ?? 'Play',
-                                    onPressed: onPlay,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                HomeNeonPlayButton(
-                                  onPressed: onPlay,
-                                  size: 46,
-                                  iconSize: 22,
-                                ),
-                              ],
-                            ),
-                          ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        typeLabel ?? 'DISCOVER',
+                        style: TextStyle(
+                          color: colorScheme.primary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.4,
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 6),
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 26,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                          height: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        isAlbum
+                            ? (context.l10n?.album ?? 'Album')
+                            : (context.l10n?.suggestedPlaylists ??
+                                  'Suggested playlists'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _PlayNowButton(
+                              label: context.l10n?.play ?? 'Play',
+                              onPressed: onPlay,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          HomeNeonPlayButton(
+                            onPressed: onPlay,
+                            size: 46,
+                            iconSize: 22,
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -341,27 +318,30 @@ class _HeroArtwork extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = imageUrl;
     if (url == null || url.isEmpty) {
-      return const ColoredBox(
-        color: WiyaDesign.surface,
-        child: NullArtworkWidget(size: 280, borderRadius: WiyaDesign.cornerRadius),
+      return const SizedBox.expand(
+        child: NullArtworkWidget(
+          size: 280,
+          borderRadius: WiyaDesign.cornerRadius,
+        ),
       );
     }
 
     try {
-      return Image(
-        image: ArtworkProvider.get(url),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const ColoredBox(
-          color: WiyaDesign.surface,
-          child: NullArtworkWidget(
+      return SizedBox.expand(
+        child: Image(
+          image: ArtworkProvider.get(url),
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          alignment: Alignment.center,
+          errorBuilder: (_, __, ___) => const NullArtworkWidget(
             size: 280,
             borderRadius: WiyaDesign.cornerRadius,
           ),
         ),
       );
     } catch (_) {
-      return const ColoredBox(
-        color: WiyaDesign.surface,
+      return const SizedBox.expand(
         child: NullArtworkWidget(
           size: 280,
           borderRadius: WiyaDesign.cornerRadius,

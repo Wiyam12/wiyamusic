@@ -19,10 +19,20 @@
  *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
+import 'dart:async';
+
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:wiyamusic/main.dart';
-import 'package:wiyamusic/widgets/mini_player.dart';
+
+OverlayEntry? _activeToast;
+Timer? _toastTimer;
+
+void _dismissToast() {
+  _toastTimer?.cancel();
+  _toastTimer = null;
+  _activeToast?.remove();
+  _activeToast = null;
+}
 
 void showToast(
   BuildContext context,
@@ -30,16 +40,11 @@ void showToast(
   Duration duration = const Duration(seconds: 3),
   IconData? icon,
 }) {
-  final colorScheme = Theme.of(context).colorScheme;
-  final isMiniPlayerVisible = audioHandler.mediaItem.value != null;
-  final bottomMargin =
-      12.0 + (isMiniPlayerVisible ? MiniPlayer.playerHeight : 0.0);
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      margin: EdgeInsets.fromLTRB(16, 12, 16, bottomMargin),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      content: Row(
+  _showTopToast(
+    context,
+    duration: duration,
+    builder: (colorScheme, textStyle, dismiss) {
+      return Row(
         children: [
           Icon(
             icon ?? FluentIcons.checkmark_circle_20_regular,
@@ -47,11 +52,10 @@ void showToast(
             size: 20,
           ),
           const SizedBox(width: 12),
-          Expanded(child: Text(text)),
+          Expanded(child: Text(text, style: textStyle)),
         ],
-      ),
-      duration: duration,
-    ),
+      );
+    },
   );
 }
 
@@ -63,16 +67,15 @@ void showToastWithButton(
   Duration duration = const Duration(seconds: 3),
   IconData? icon,
 }) {
-  final colorScheme = Theme.of(context).colorScheme;
-  final isMiniPlayerVisible = audioHandler.mediaItem.value != null;
-  final bottomMargin =
-      12.0 + (isMiniPlayerVisible ? MiniPlayer.playerHeight : 0.0);
+  final actionColor =
+      Theme.of(context).snackBarTheme.actionTextColor ??
+      Theme.of(context).colorScheme.primary;
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      margin: EdgeInsets.fromLTRB(16, 12, 16, bottomMargin),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      content: Row(
+  _showTopToast(
+    context,
+    duration: duration,
+    builder: (colorScheme, textStyle, dismiss) {
+      return Row(
         children: [
           Icon(
             icon ?? FluentIcons.info_20_regular,
@@ -80,15 +83,97 @@ void showToastWithButton(
             size: 20,
           ),
           const SizedBox(width: 12),
-          Expanded(child: Text(text)),
+          Expanded(child: Text(text, style: textStyle)),
+          TextButton(
+            onPressed: () {
+              dismiss();
+              onPressedToast();
+            },
+            child: Text(
+              buttonName,
+              style: TextStyle(color: actionColor, fontWeight: FontWeight.w600),
+            ),
+          ),
         ],
-      ),
-      action: SnackBarAction(
-        label: buttonName,
-        onPressed: () => onPressedToast(),
-      ),
-      persist: false,
-      duration: duration,
-    ),
+      );
+    },
   );
+}
+
+void _showTopToast(
+  BuildContext context, {
+  required Duration duration,
+  required Widget Function(
+    ColorScheme colorScheme,
+    TextStyle? textStyle,
+    VoidCallback dismiss,
+  )
+  builder,
+}) {
+  final overlay = Overlay.maybeOf(context);
+  if (overlay == null) return;
+
+  final theme = Theme.of(context);
+  final colorScheme = theme.colorScheme;
+  final snackTheme = theme.snackBarTheme;
+  final background =
+      snackTheme.backgroundColor ?? colorScheme.secondaryContainer;
+  final textStyle =
+      snackTheme.contentTextStyle ??
+      TextStyle(
+        color: colorScheme.onSecondaryContainer,
+        fontWeight: FontWeight.w500,
+      );
+  final shape =
+      snackTheme.shape ??
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(20));
+
+  _dismissToast();
+
+  late final OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (overlayContext) {
+      final top = MediaQuery.paddingOf(overlayContext).top + 12;
+
+      return Positioned(
+        top: top,
+        left: 16,
+        right: 16,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Material(
+              color: background,
+              elevation: snackTheme.elevation ?? 0,
+              shape: shape,
+              clipBehavior: Clip.antiAlias,
+              child: Dismissible(
+                key: const ValueKey('top-toast'),
+                direction: DismissDirection.up,
+                onDismissed: (_) => _dismissToast(),
+                child: SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: builder(colorScheme, textStyle, _dismissToast),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
+  _activeToast = entry;
+  overlay.insert(entry);
+  _toastTimer = Timer(duration, () {
+    if (_activeToast == entry) _dismissToast();
+  });
 }

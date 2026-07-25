@@ -22,11 +22,11 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_flip_card/flutter_flip_card.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/widgets/now_playing/bottom_actions_row.dart';
 import 'package:wiyamusic/widgets/now_playing/now_playing_artwork.dart';
 import 'package:wiyamusic/widgets/now_playing/now_playing_controls.dart';
+import 'package:wiyamusic/widgets/overflow_menu_button.dart';
 import 'package:wiyamusic/widgets/queue_list_view.dart';
 
 class NowPlayingPage extends StatefulWidget {
@@ -37,7 +37,13 @@ class NowPlayingPage extends StatefulWidget {
 }
 
 class _NowPlayingPageState extends State<NowPlayingPage> {
-  final _lyricsController = FlipCardController();
+  final _lyricsController = NowPlayingLyricsController();
+
+  @override
+  void dispose() {
+    _lyricsController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,11 +53,11 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     final colorScheme = theme.colorScheme;
     final screenWidth = size.width;
     final baseIconSize = screenWidth < 360
-        ? 36.0
+        ? 28.0
         : screenWidth < 400
-        ? 40.0
-        : 44.0;
-    final miniIconSize = screenWidth < 360 ? 18.0 : 22.0;
+        ? 32.0
+        : 36.0;
+    final miniIconSize = screenWidth < 360 ? 22.0 : 24.0;
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -65,7 +71,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
             final metadata = snapshot.data!;
             return Column(
               children: [
-                _buildAppBar(context, colorScheme),
+                _buildAppBar(context, colorScheme, metadata),
                 Expanded(
                   child: isLargeScreen
                       ? _DesktopLayout(
@@ -92,23 +98,55 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     );
   }
 
-  Widget _buildAppBar(BuildContext context, ColorScheme colorScheme) {
+  Widget _buildAppBar(
+    BuildContext context,
+    ColorScheme colorScheme,
+    MediaItem metadata,
+  ) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
-        children: [
-          IconButton(
-            iconSize: 26,
-            icon: const Icon(FluentIcons.chevron_down_24_regular),
-            style: IconButton.styleFrom(
-              backgroundColor: colorScheme.surfaceContainerHighest,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: SizedBox(
+        height: 48,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Text(
+              'Now Playing',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: colorScheme.onSurface,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
               ),
             ),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ],
+            Row(
+              children: [
+                IconButton(
+                  icon: Icon(
+                    FluentIcons.chevron_down_24_regular,
+                    color: colorScheme.onSurface,
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                const Spacer(),
+                OverflowMenuButton<String>(
+                  color: colorScheme.onSurface,
+                  onSelected: (value) => handleNowPlayingMoreAction(
+                    context: context,
+                    value: value,
+                    metadata: metadata,
+                    lyricsController: _lyricsController,
+                  ),
+                  itemBuilder: (context) => buildNowPlayingMoreMenuItems(
+                    context: context,
+                    metadata: metadata,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -126,31 +164,28 @@ class _DesktopLayout extends StatelessWidget {
   final Size size;
   final double adjustedIconSize;
   final double adjustedMiniIconSize;
-  final FlipCardController lyricsController;
+  final NowPlayingLyricsController lyricsController;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              children: [
-                const SizedBox(height: 16),
-                Expanded(
-                  flex: 5,
-                  child: Center(
-                    child: NowPlayingArtwork(
-                      size: size,
-                      metadata: metadata,
-                      lyricsController: lyricsController,
-                    ),
-                  ),
+          child: Column(
+            children: [
+              Expanded(
+                flex: 5,
+                child: NowPlayingArtwork(
+                  size: size,
+                  metadata: metadata,
+                  lyricsController: lyricsController,
                 ),
-                if (!(metadata.extras?['isLive'] ?? false))
-                  Expanded(
-                    flex: 4,
+              ),
+              if (!(metadata.extras?['isLive'] ?? false))
+                Expanded(
+                  flex: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
                     child: NowPlayingControls(
                       size: size,
                       audioId: metadata.extras?['ytid'],
@@ -159,15 +194,18 @@ class _DesktopLayout extends StatelessWidget {
                       metadata: metadata,
                     ),
                   ),
-                BottomActionsRow(
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: BottomActionsRow(
                   metadata: metadata,
                   iconSize: adjustedMiniIconSize,
                   isLargeScreen: true,
                   lyricsController: lyricsController,
                 ),
-                const SizedBox(height: 16),
-              ],
-            ),
+              ),
+              const SizedBox(height: 20),
+            ],
           ),
         ),
         const Expanded(child: QueueWidget()),
@@ -190,7 +228,7 @@ class _MobileLayout extends StatelessWidget {
   final double adjustedIconSize;
   final double adjustedMiniIconSize;
   final bool isLargeScreen;
-  final FlipCardController lyricsController;
+  final NowPlayingLyricsController lyricsController;
 
   @override
   Widget build(BuildContext context) {
@@ -205,41 +243,44 @@ class _MobileLayout extends StatelessWidget {
   Widget _buildPortraitLayout(BuildContext context) {
     final isLive = metadata.extras?['isLive'] ?? false;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        children: [
-          const SizedBox(height: 8),
-          Expanded(
-            flex: 5,
-            child: Center(
-              child: NowPlayingArtwork(
-                size: size,
-                metadata: metadata,
-                lyricsController: lyricsController,
-              ),
-            ),
-          ),
-          if (!isLive)
-            Expanded(
-              flex: 4,
-              child: NowPlayingControls(
-                size: size,
-                audioId: metadata.extras?['ytid'],
-                adjustedIconSize: adjustedIconSize,
-                adjustedMiniIconSize: adjustedMiniIconSize,
-                metadata: metadata,
-              ),
-            ),
-          BottomActionsRow(
+    return Column(
+      children: [
+        Expanded(
+          flex: 11,
+          child: NowPlayingArtwork(
+            size: size,
             metadata: metadata,
-            iconSize: adjustedMiniIconSize,
-            isLargeScreen: isLargeScreen,
             lyricsController: lyricsController,
           ),
-          const SizedBox(height: 16),
-        ],
-      ),
+        ),
+        Expanded(
+          flex: 9,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Column(
+              children: [
+                if (!isLive)
+                  Expanded(
+                    child: NowPlayingControls(
+                      size: size,
+                      audioId: metadata.extras?['ytid'],
+                      adjustedIconSize: adjustedIconSize,
+                      adjustedMiniIconSize: adjustedMiniIconSize,
+                      metadata: metadata,
+                    ),
+                  ),
+                BottomActionsRow(
+                  metadata: metadata,
+                  iconSize: adjustedMiniIconSize,
+                  isLargeScreen: isLargeScreen,
+                  lyricsController: lyricsController,
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 

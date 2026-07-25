@@ -36,6 +36,7 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/localization/app_localizations.dart';
 import 'package:wiyamusic/services/audio_service.dart';
+import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/listening_stats_service.dart';
@@ -244,9 +245,12 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
             statusBarColor: Colors.transparent,
             systemNavigationBarColor: Colors.transparent,
             systemNavigationBarContrastEnforced: true,
+            // iOS: brightness of the *background* under the status bar.
+            // Dark background → white time/battery icons.
             statusBarBrightness: brightness == Brightness.dark
-                ? Brightness.light
-                : Brightness.dark,
+                ? Brightness.dark
+                : Brightness.light,
+            // Android: brightness of the icons themselves.
             statusBarIconBrightness: brightness == Brightness.dark
                 ? Brightness.light
                 : Brightness.dark,
@@ -300,7 +304,9 @@ Future<void> initialisation() async {
         androidNotificationChannelName: 'WiyaMusic',
         androidNotificationIcon: 'drawable/ic_launcher_foreground',
         androidShowNotificationBadge: true,
-        androidStopForegroundOnPause: false,
+        // Leave foreground on pause so the notification can be swiped away,
+        // and so stop()/X can actually cancel it on modern Android.
+        androidStopForegroundOnPause: true,
       ),
     );
 
@@ -328,6 +334,8 @@ Future<void> initialisation() async {
 
   applicationDirPath = (await getApplicationDocumentsDirectory()).path;
   await FilePaths.ensureDirectoriesExist();
+  // Fix stale absolute offline paths after iOS container UUID changes.
+  await repairOfflineSongPaths();
 
   // TODO: Remove after a few versions, this is just for legacy support
   unawaited(listeningStatsService.purgeLegacyRadioStreamStats());

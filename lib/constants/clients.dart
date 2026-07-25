@@ -3,12 +3,17 @@ import 'dart:io';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 /// Clients tried one-at-a-time when resolving stream manifests.
+///
+/// ANDROID_VR is prioritized everywhere: it reliably returns audio streams and
+/// avoids the 403 that the IOS client throws on some video itags (e.g. 137)
+/// while building the manifest, which otherwise aborts the whole fetch. The
+/// IOS client is kept only as a last-resort fallback on Apple platforms.
 List<YoutubeApiClient> get customClients {
   if (Platform.isIOS || Platform.isMacOS) {
     return [
-      YoutubeApiClient.ios,
-      YoutubeApiClient.androidSdkless,
       customAndroidVr,
+      YoutubeApiClient.androidSdkless,
+      YoutubeApiClient.ios,
     ];
   }
 

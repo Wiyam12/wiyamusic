@@ -34,6 +34,7 @@ import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/theme/design_tokens.dart';
 import 'package:wiyamusic/utilities/app_utils.dart';
+import 'package:wiyamusic/utilities/artwork_provider.dart';
 import 'package:wiyamusic/utilities/async_loader.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/offline_playlist_dialogs.dart';
@@ -43,6 +44,7 @@ import 'package:wiyamusic/widgets/confirmation_dialog.dart';
 import 'package:wiyamusic/widgets/home/home_media_card.dart';
 import 'package:wiyamusic/widgets/home/home_section_header.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
+import 'package:wiyamusic/widgets/pinned_sliver_header.dart';
 import 'package:wiyamusic/widgets/playlist_bar.dart';
 
 enum _LibraryFilter { playlists, songs, albums, artists }
@@ -127,6 +129,9 @@ class _LibraryPageState extends State<LibraryPage> {
     }
 
     final topInset = MediaQuery.paddingOf(context).top;
+    // top padding (8) + title row (~48) + chips block (18 + ~36 + 8).
+    const headerBodyHeight = 120.0;
+    final stickyHeight = topInset + headerBodyHeight;
 
     return Scaffold(
       body: AnimatedBuilder(
@@ -146,51 +151,57 @@ class _LibraryPageState extends State<LibraryPage> {
         builder: (context, _) {
           return CustomScrollView(
             slivers: [
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(16, topInset + 8, 12, 0),
-                sliver: SliverToBoxAdapter(
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 4),
-                          child: Text(
-                            'Your ${context.l10n!.library}',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontSize: 32,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.8,
+              PinnedSliverHeader(
+                height: stickyHeight,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(16, topInset + 8, 12, 0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: Text(
+                                'Your ${context.l10n!.library}',
+                                style: TextStyle(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurface,
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.8,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                          if (!offlineMode.value)
+                            IconButton(
+                              tooltip: context.l10n!.createFolder,
+                              onPressed: _showCreateFolderDialog,
+                              icon: Icon(
+                                FluentIcons.folder_add_24_regular,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
                       ),
-                      if (!offlineMode.value)
-                        IconButton(
-                          tooltip: context.l10n!.createFolder,
-                          onPressed: _showCreateFolderDialog,
-                          icon: Icon(
-                            FluentIcons.folder_add_24_regular,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-                  child: _LibraryFilterChips(
-                    selected: _filter,
-                    onSelected: (filter) {
-                      setState(() {
-                        _filter = _filter == filter ? null : filter;
-                      });
-                    },
-                  ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                      child: _LibraryFilterChips(
+                        selected: _filter,
+                        onSelected: (filter) {
+                          setState(() {
+                            _filter = _filter == filter ? null : filter;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
               ..._buildFilterSlivers(),
@@ -247,6 +258,10 @@ class _LibraryPageState extends State<LibraryPage> {
                 cardWidth: _overviewCardWidth,
                 emptyMessage: 'No recently played songs',
                 emptyIcon: FluentIcons.history_24_regular,
+                emptyActionLabel: offlineMode.value ? null : 'Play Something',
+                onEmptyAction: offlineMode.value
+                    ? null
+                    : () => NavigationManager.router.go('/home'),
                 onSeeAll: offlineMode.value || recents.isEmpty
                     ? null
                     : () => NavigationManager.router.go(
@@ -260,11 +275,41 @@ class _LibraryPageState extends State<LibraryPage> {
                 cardWidth: _overviewCardWidth,
                 emptyMessage: 'No liked songs yet',
                 emptyIcon: FluentIcons.heart_24_regular,
+                emptyActionLabel: offlineMode.value ? null : 'Explore Music',
+                onEmptyAction: offlineMode.value
+                    ? null
+                    : () => NavigationManager.router.go('/home'),
                 onSeeAll: likedSongs.isEmpty
                     ? null
                     : () => NavigationManager.router.go(
                         '/library/userSongs/liked',
                       ),
+              ),
+              _OverviewPlaylistRail(
+                title: context.l10n!.likedPlaylists,
+                items: getLikedPlaylistItems(
+                  excludeAlbums: true,
+                  offlineOnly: offlineMode.value,
+                ).take(_overviewCardLimit).toList(),
+                railHeight: _overviewRailHeight,
+                cardWidth: _overviewCardWidth,
+                emptyMessage: 'No liked playlists yet',
+                emptyIcon: FluentIcons.heart_24_regular,
+                emptyActionLabel: offlineMode.value
+                    ? null
+                    : 'Discover Playlists',
+                onEmptyAction: offlineMode.value
+                    ? null
+                    : () => NavigationManager.router.go('/search'),
+                subtitleBuilder: (_) => context.l10n!.playlist,
+                onSeeAll:
+                    getLikedPlaylistItems(
+                      excludeAlbums: true,
+                      offlineOnly: offlineMode.value,
+                    ).isEmpty
+                    ? null
+                    : () => setState(() => _filter = _LibraryFilter.playlists),
+                onOpen: _openPlaylistOrArtist,
               ),
               _OverviewPlaylistRail(
                 title: context.l10n!.albums,
@@ -273,6 +318,10 @@ class _LibraryPageState extends State<LibraryPage> {
                 cardWidth: _overviewCardWidth,
                 emptyMessage: 'No albums yet',
                 emptyIcon: FluentIcons.album_24_regular,
+                emptyActionLabel: offlineMode.value ? null : 'Search Albums',
+                onEmptyAction: offlineMode.value
+                    ? null
+                    : () => NavigationManager.router.go('/search'),
                 subtitleBuilder: (_) => context.l10n!.album,
                 onSeeAll: albums.isEmpty
                     ? null
@@ -286,6 +335,10 @@ class _LibraryPageState extends State<LibraryPage> {
                 cardWidth: _overviewCardWidth,
                 emptyMessage: 'No artists yet',
                 emptyIcon: FluentIcons.person_24_regular,
+                emptyActionLabel: offlineMode.value ? null : 'Find Artists',
+                onEmptyAction: offlineMode.value
+                    ? null
+                    : () => NavigationManager.router.go('/search'),
                 subtitleBuilder: (_) => context.l10n!.artist,
                 titleBuilder: (item) => normalizeArtistDisplayTitle(
                   item['title']?.toString() ?? '',
@@ -306,9 +359,14 @@ class _LibraryPageState extends State<LibraryPage> {
 
   List<Map> _collectAlbums() {
     final albums = <dynamic>[
-      ...resolvePinnedPlaylists(pinnedPlaylistIds.value),
-      ...getPlaylistsNotInFolders(),
-      if (!offlineMode.value) ...getLikedPlaylistItems(),
+      if (offlineMode.value) ...[
+        ...getOfflineAlbumItems(),
+        ...getLikedAlbumItems(offlineOnly: true),
+      ] else ...[
+        ...resolvePinnedPlaylists(pinnedPlaylistIds.value),
+        ...getPlaylistsNotInFolders(),
+        ...getLikedAlbumItems(),
+      ],
     ].where((p) => p is Map && p['isAlbum'] == true);
 
     final seen = <String>{};
@@ -322,7 +380,7 @@ class _LibraryPageState extends State<LibraryPage> {
     return unique;
   }
 
-  void _openPlaylistOrArtist(Map item) {
+  Future<void> _openPlaylistOrArtist(Map item) async {
     final ytid = item['ytid']?.toString();
     if (ytid == null || ytid.isEmpty) return;
 
@@ -330,12 +388,76 @@ class _LibraryPageState extends State<LibraryPage> {
         item['source']?.toString() == 'youtube-artist' ||
         PlaylistUtils.isArtistPlaylist(item);
 
+    // Prefer downloaded / liked local cache so opens work without internet.
+    Map<String, dynamic>? offlineItem;
+    for (final playlist in offlinePlaylistService.offlinePlaylists.value) {
+      if (playlist is Map && playlist['ytid']?.toString() == ytid) {
+        offlineItem = Map<String, dynamic>.from(playlist);
+        break;
+      }
+    }
+
+    Map<String, dynamic> resolved =
+        offlineItem ?? Map<String, dynamic>.from(item);
+    final existingList = resolved['list'];
+    if (existingList is! List || existingList.isEmpty) {
+      final local = await getPlaylistInfoForWidget(
+        ytid,
+        isArtist: isArtist,
+        artistName: resolved['title']?.toString(),
+        artistImage: resolved['image']?.toString(),
+        localOnly: true,
+      );
+      if (local != null) {
+        resolved = Map<String, dynamic>.from(local);
+      }
+    }
+
+    if (!mounted) return;
+
     if (isArtist) {
-      context.push('/library/artist/${Uri.encodeComponent(ytid)}', extra: item);
+      context.push(
+        '/library/artist/${Uri.encodeComponent(ytid)}',
+        extra: resolved,
+      );
       return;
     }
 
-    context.push('/home/playlist/$ytid');
+    if (PlaylistUtils.isCustomPlaylist(resolved)) {
+      context.push(
+        '${NavigationManager.libraryPath}/playlist/$ytid',
+        extra: resolved,
+      );
+      return;
+    }
+
+    context.push(
+      '${NavigationManager.libraryPath}/playlist/$ytid',
+      extra: resolved,
+    );
+  }
+
+  Future<void> _onCreatePlaylistTap() async {
+    final result = await showCreatePlaylistDialog(context);
+    if (!mounted || result == null) return;
+
+    if (result['type'] == 'custom') {
+      final playlistId = result['id'];
+      if (playlistId == null || playlistId.isEmpty) return;
+      Map? playlist;
+      for (final entry in userCustomPlaylists.value) {
+        if (entry['ytid']?.toString() == playlistId) {
+          playlist = entry;
+          break;
+        }
+      }
+      unawaited(
+        context.push(
+          '${NavigationManager.libraryPath}/playlist/$playlistId',
+          extra: playlist,
+        ),
+      );
+    }
   }
 
   List<Widget> _buildPlaylistsSlivers() {
@@ -344,7 +466,12 @@ class _LibraryPageState extends State<LibraryPage> {
 
     final rawOfflinePlaylists = offlinePlaylistService.offlinePlaylists.value;
     final visibleOfflinePlaylists = rawOfflinePlaylists
-        .where((p) => p is Map && !PlaylistUtils.isArtistPlaylist(p))
+        .where(
+          (p) =>
+              p is Map &&
+              !PlaylistUtils.isArtistPlaylist(p) &&
+              p['isAlbum'] != true,
+        )
         .toList();
     final folders = isOffline
         ? userPlaylistFolders.value
@@ -376,9 +503,26 @@ class _LibraryPageState extends State<LibraryPage> {
         .where((p) => p['isAlbum'] != true)
         .toList();
 
-    final likedPlaylists = isOffline
-        ? <dynamic>[]
-        : getLikedPlaylistItems().where((p) => p['isAlbum'] != true).toList();
+    final likedPlaylists = getLikedPlaylistItems(
+      excludeAlbums: true,
+      offlineOnly: isOffline,
+    );
+    // Avoid showing the same playlist twice when it's already listed above
+    // (custom / folder / pinned / offline).
+    final alreadyListedIds = <String>{
+      for (final p in pinned) p['ytid']?.toString() ?? '',
+      for (final f in folders)
+        for (final p in (f['playlists'] as List? ?? const []))
+          if (p is Map) p['ytid']?.toString() ?? '',
+      for (final p in playlistsNotInFolders) p['ytid']?.toString() ?? '',
+      for (final p in offlinePlaylistsNotInFolders)
+        (p is Map ? p['ytid']?.toString() : null) ?? '',
+    }..removeWhere((id) => id.isEmpty);
+
+    final likedOnly = likedPlaylists.where((p) {
+      final id = p['ytid']?.toString() ?? '';
+      return id.isNotEmpty && !alreadyListedIds.contains(id);
+    }).toList();
 
     final slivers = <Widget>[
       if (!isOffline)
@@ -393,7 +537,7 @@ class _LibraryPageState extends State<LibraryPage> {
                     icon: FluentIcons.add_24_regular,
                     background: colorScheme.surfaceContainerHigh,
                   ),
-                  onTap: () => showCreatePlaylistDialog(context),
+                  onTap: _onCreatePlaylistTap,
                 ),
                 const SizedBox(height: 6),
                 _LibraryActionTile(
@@ -426,9 +570,6 @@ class _LibraryPageState extends State<LibraryPage> {
         ),
       );
     }
-    if (likedPlaylists.isNotEmpty) {
-      slivers.add(_buildPlaylistListSliver(likedPlaylists));
-    }
 
     if (!isOffline && userPlaylists.value.isNotEmpty) {
       slivers.add(
@@ -455,6 +596,26 @@ class _LibraryPageState extends State<LibraryPage> {
           ),
         ),
       );
+    }
+
+    if (likedOnly.isNotEmpty) {
+      slivers.add(
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Text(
+              context.l10n!.likedPlaylists,
+              style: TextStyle(
+                color: colorScheme.onSurface,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ),
+        ),
+      );
+      slivers.add(_buildPlaylistListSliver(likedOnly));
     }
 
     if (slivers.length == 1 && isOffline) {
@@ -548,22 +709,9 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   List<Widget> _buildAlbumsSlivers() {
-    final albums = <dynamic>[
-      ...resolvePinnedPlaylists(pinnedPlaylistIds.value),
-      ...getPlaylistsNotInFolders(),
-      if (!offlineMode.value) ...getLikedPlaylistItems(),
-    ].where((p) => p is Map && p['isAlbum'] == true).toList();
+    final albums = _collectAlbums();
 
-    // Dedupe by ytid
-    final seen = <String>{};
-    final unique = <dynamic>[];
-    for (final album in albums) {
-      final id = album['ytid']?.toString() ?? '';
-      if (id.isNotEmpty && !seen.add(id)) continue;
-      unique.add(album);
-    }
-
-    if (unique.isEmpty) {
+    if (albums.isEmpty) {
       return [
         SliverFillRemaining(
           hasScrollBody: false,
@@ -579,7 +727,9 @@ class _LibraryPageState extends State<LibraryPage> {
       ];
     }
 
-    return [_buildPlaylistListSliver(unique)];
+    return [
+      _buildPlaylistListSliver(albums, isOfflinePlaylists: offlineMode.value),
+    ];
   }
 
   List<Widget> _buildArtistsSlivers() {
@@ -599,7 +749,9 @@ class _LibraryPageState extends State<LibraryPage> {
         ),
       ];
     }
-    return [_buildPlaylistListSliver(artists)];
+    return [
+      _buildPlaylistListSliver(artists, isOfflinePlaylists: offlineMode.value),
+    ];
   }
 
   Widget _buildPlaylistListSliver(
@@ -642,23 +794,25 @@ class _LibraryPageState extends State<LibraryPage> {
 
   Widget _playlistBarFor(dynamic playlist, {bool isOfflinePlaylists = false}) {
     final isArtist = playlist['source']?.toString() == 'youtube-artist';
+    final title = playlist['title']?.toString() ?? context.l10n!.playlist;
+    final playlistMap = playlist is Map
+        ? Map<String, dynamic>.from(
+            playlist.map((key, value) => MapEntry(key.toString(), value)),
+          )
+        : null;
     return PlaylistBar(
       key: listItemKey('library_playlist', playlist.hashCode, playlist),
-      playlist['title'],
-      playlistId: playlist['ytid'],
+      title,
+      playlistId: playlist['ytid']?.toString(),
       playlistArtwork: playlist['image']?.toString(),
       subtitle: isArtist ? null : _playlistSongCountLabel(playlist),
       cubeIcon: isArtist
           ? FluentIcons.person_24_filled
           : FluentIcons.text_bullet_list_24_filled,
       isAlbum: isArtist ? false : playlist['isAlbum'],
-      playlistData:
-          isArtist ||
-              playlist['source'] == 'user-created' ||
-              playlist['source'] == 'user-youtube' ||
-              isOfflinePlaylists
-          ? playlist
-          : null,
+      // Always pass data for library rows so opens hydrate from local cache
+      // instead of going straight to the network.
+      playlistData: playlistMap,
       onDelete:
           playlist['source'] == 'user-created' ||
               playlist['source'] == 'user-youtube' ||
@@ -1062,6 +1216,8 @@ class _OverviewSongRail extends StatelessWidget {
     required this.cardWidth,
     required this.emptyMessage,
     required this.emptyIcon,
+    this.emptyActionLabel,
+    this.onEmptyAction,
     this.onSeeAll,
   });
 
@@ -1071,6 +1227,8 @@ class _OverviewSongRail extends StatelessWidget {
   final double cardWidth;
   final String emptyMessage;
   final IconData emptyIcon;
+  final String? emptyActionLabel;
+  final VoidCallback? onEmptyAction;
   final VoidCallback? onSeeAll;
 
   @override
@@ -1088,6 +1246,8 @@ class _OverviewSongRail extends StatelessWidget {
             height: railHeight,
             message: emptyMessage,
             icon: emptyIcon,
+            actionLabel: emptyActionLabel,
+            onAction: onEmptyAction,
           )
         else
           SizedBox(
@@ -1124,6 +1284,8 @@ class _OverviewPlaylistRail extends StatelessWidget {
     required this.emptyIcon,
     required this.subtitleBuilder,
     required this.onOpen,
+    this.emptyActionLabel,
+    this.onEmptyAction,
     this.titleBuilder,
     this.imageBuilder,
     this.onSeeAll,
@@ -1135,6 +1297,8 @@ class _OverviewPlaylistRail extends StatelessWidget {
   final double cardWidth;
   final String emptyMessage;
   final IconData emptyIcon;
+  final String? emptyActionLabel;
+  final VoidCallback? onEmptyAction;
   final String Function(Map item) subtitleBuilder;
   final String Function(Map item)? titleBuilder;
   final String? Function(Map item)? imageBuilder;
@@ -1156,6 +1320,8 @@ class _OverviewPlaylistRail extends StatelessWidget {
             height: railHeight,
             message: emptyMessage,
             icon: emptyIcon,
+            actionLabel: emptyActionLabel,
+            onAction: onEmptyAction,
           )
         else
           SizedBox(
@@ -1191,18 +1357,23 @@ class _OverviewEmptyState extends StatelessWidget {
     required this.height,
     required this.message,
     required this.icon,
+    this.actionLabel,
+    this.onAction,
   });
 
   final double height;
   final String message;
   final IconData icon;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final hasAction = actionLabel != null && onAction != null;
 
     return SizedBox(
-      height: height,
+      height: hasAction ? height + 28 : height,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerLow,
@@ -1229,6 +1400,24 @@ class _OverviewEmptyState extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                   ),
                 ),
+                if (hasAction) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: onAction,
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    child: Text(actionLabel!),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1244,6 +1433,6 @@ String? _librarySongImage(Map song) {
   final lowRes = song['lowResImage']?.toString();
   if (lowRes != null && lowRes.isNotEmpty) return lowRes;
   final artworkPath = song['artworkPath']?.toString();
-  if (artworkPath != null && artworkPath.isNotEmpty) return artworkPath;
+  if (ArtworkProvider.localFileExists(artworkPath)) return artworkPath;
   return null;
 }

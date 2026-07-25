@@ -25,14 +25,18 @@ import 'package:flutter/material.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/services/common_services.dart';
+import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/utilities/flutter_bottom_sheet.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/mediaitem.dart';
 import 'package:wiyamusic/utilities/playlist_dialogs.dart';
+import 'package:wiyamusic/widgets/now_playing/now_playing_artwork.dart';
+import 'package:wiyamusic/widgets/now_playing/song_share_card.dart';
+import 'package:wiyamusic/widgets/popup_menu_item.dart';
 import 'package:wiyamusic/widgets/queue_list_view.dart';
 
-class BottomActionsRow extends StatefulWidget {
+class BottomActionsRow extends StatelessWidget {
   const BottomActionsRow({
     super.key,
     required this.metadata,
@@ -43,330 +47,195 @@ class BottomActionsRow extends StatefulWidget {
   final MediaItem metadata;
   final double iconSize;
   final bool isLargeScreen;
-  final dynamic lyricsController;
+  final NowPlayingLyricsController lyricsController;
 
-  @override
-  State<BottomActionsRow> createState() => _BottomActionsRowState();
-}
-
-class _BottomActionsRowState extends State<BottomActionsRow> {
-  late final ValueNotifier<bool> _songLikeStatus;
-  late final ValueNotifier<bool> _songOfflineStatus;
-
-  /// YouTube video id for songs; queue MediaItem.id is a local queue entry id.
-  String? get audioId {
-    if (isRadioStation) return widget.metadata.id;
-    final ytid = widget.metadata.extras?['ytid']?.toString().trim();
-    if (ytid != null && ytid.isNotEmpty) return ytid;
-    return widget.metadata.id;
-  }
-
-  bool get isRadioStation => widget.metadata.extras?['isLive'] == true;
-
-  @override
-  void initState() {
-    super.initState();
-    if (isRadioStation) {
-      _songLikeStatus = ValueNotifier<bool>(isRadioStationLiked(audioId ?? ''));
-      userLikedRadioStations.addListener(_syncRadioLikeStatus);
-    } else {
-      _songLikeStatus = ValueNotifier<bool>(isSongAlreadyLiked(audioId));
-      userLikedSongsList.addListener(_syncLikeStatus);
-    }
-    _songOfflineStatus = ValueNotifier<bool>(isSongAlreadyOffline(audioId));
-    userOfflineSongs.addListener(_syncOfflineStatus);
-  }
-
-  void _syncLikeStatus() {
-    final newStatus = isSongAlreadyLiked(audioId);
-    if (_songLikeStatus.value != newStatus) {
-      _songLikeStatus.value = newStatus;
-    }
-  }
-
-  void _syncRadioLikeStatus() {
-    final newStatus = isRadioStationLiked(audioId ?? '');
-    if (_songLikeStatus.value != newStatus) {
-      _songLikeStatus.value = newStatus;
-    }
-  }
-
-  void _syncOfflineStatus() {
-    final newStatus = isSongAlreadyOffline(audioId);
-    if (_songOfflineStatus.value != newStatus) {
-      _songOfflineStatus.value = newStatus;
-    }
-  }
-
-  @override
-  void didUpdateWidget(BottomActionsRow oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.metadata.id != widget.metadata.id) {
-      if (isRadioStation) {
-        _songLikeStatus.value = isRadioStationLiked(audioId ?? '');
-      } else {
-        _songLikeStatus.value = isSongAlreadyLiked(audioId);
-      }
-      _songOfflineStatus.value = isSongAlreadyOffline(audioId);
-    }
-  }
-
-  @override
-  void dispose() {
-    if (isRadioStation) {
-      userLikedRadioStations.removeListener(_syncRadioLikeStatus);
-    } else {
-      userLikedSongsList.removeListener(_syncLikeStatus);
-    }
-    userOfflineSongs.removeListener(_syncOfflineStatus);
-    _songLikeStatus.dispose();
-    _songOfflineStatus.dispose();
-    super.dispose();
-  }
+  bool get isRadioStation => metadata.extras?['isLive'] == true;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final l10n = context.l10n!;
-
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final responsiveIconSize = screenWidth < 360
-        ? widget.iconSize * 0.85
-        : widget.iconSize;
+    final size = screenWidth < 360 ? iconSize * 0.95 : iconSize;
 
-    return StreamBuilder<List<Map>>(
-      stream: audioHandler.queueAsMapStream,
-      builder: (context, snapshot) {
-        final queue = snapshot.data ?? [];
-
-        final actions = <Widget>[
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
           if (!isRadioStation)
-            _buildActionButton(
-              context: context,
-              icon: FluentIcons.cloud_arrow_down_24_regular,
-              activeIcon: FluentIcons.cloud_off_24_filled,
-              colorScheme: colorScheme,
-              size: responsiveIconSize,
-              statusNotifier: _songOfflineStatus,
-              onPressed: audioId == null
-                  ? null
-                  : () => _toggleOffline(
-                      _songOfflineStatus,
-                      audioId,
-                      widget.metadata,
-                    ),
-              tooltip: l10n.makeOffline,
-            ),
-          _buildSleepTimerButton(context, colorScheme, responsiveIconSize),
-          if (!offlineMode.value && !isRadioStation)
-            _buildSimpleActionButton(
-              context: context,
-              icon: FluentIcons.album_add_24_regular,
-              colorScheme: colorScheme,
-              size: responsiveIconSize,
-              onPressed: () => showAddToPlaylistDialog(
-                context,
-                song: mediaItemToMap(widget.metadata),
+            IconButton(
+              icon: Icon(
+                FluentIcons.text_quote_24_regular,
+                color: colorScheme.onSurface,
               ),
-              tooltip: l10n.addToPlaylist,
+              iconSize: size,
+              tooltip: l10n.lyrics,
+              onPressed: lyricsController.toggle,
+            )
+          else
+            IconButton(
+              icon: Icon(
+                FluentIcons.timer_24_regular,
+                color: colorScheme.onSurface,
+              ),
+              iconSize: size,
+              tooltip: l10n.sleepTimer,
+              onPressed: () => _showSleepTimerDialog(context),
             ),
-          if (queue.isNotEmpty && !isRadioStation && !widget.isLargeScreen)
-            _buildSimpleActionButton(
-              context: context,
-              icon: FluentIcons.apps_list_24_filled,
-              colorScheme: colorScheme,
-              size: responsiveIconSize,
+          IconButton(
+            icon: Icon(
+              FluentIcons.options_24_regular,
+              color: colorScheme.onSurface,
+            ),
+            iconSize: size,
+            tooltip: l10n.equalizer,
+            onPressed: () {
+              // Minimize now playing first, then open equalizer on the shell.
+              Navigator.of(context).pop();
+              NavigationManager.router.push('/settings/equalizer');
+            },
+          ),
+          if (!isLargeScreen && !isRadioStation)
+            IconButton(
+              icon: Icon(
+                FluentIcons.apps_list_detail_24_regular,
+                color: colorScheme.onSurface,
+              ),
+              iconSize: size,
+              tooltip: l10n.queue,
               onPressed: () => showCustomBottomSheet(
                 context,
                 const QueueWidget(isBottomSheet: true),
               ),
-              tooltip: l10n.queue,
-            ),
-          if (!offlineMode.value) ...[
-            if (!isRadioStation)
-              _buildSimpleActionButton(
-                context: context,
-                icon: FluentIcons.text_quote_24_regular,
-                colorScheme: colorScheme,
-                size: responsiveIconSize,
-                onPressed: widget.lyricsController.flipcard,
-                tooltip: l10n.lyrics,
-              ),
-            _buildActionButton(
-              context: context,
-              icon: FluentIcons.heart_24_regular,
-              activeIcon: FluentIcons.heart_24_filled,
-              colorScheme: colorScheme,
-              size: responsiveIconSize,
-              statusNotifier: _songLikeStatus,
-              activeColor: colorScheme.primary,
-              onPressed: () async {
-                final id = audioId;
-                if (id == null) return;
-
-                final originalValue = _songLikeStatus.value;
-                _songLikeStatus.value = !originalValue;
-
-                try {
-                  if (isRadioStation) {
-                    if (originalValue) {
-                      await removeRadioStationFromLiked(id);
-                    } else {
-                      await addRadioStationToLiked(id);
-                    }
-                  } else {
-                    await updateSongLikeStatus(
-                      audioId,
-                      !originalValue,
-                      songData: mediaItemToMap(widget.metadata),
-                    );
-                  }
-                } catch (e) {
-                  _songLikeStatus.value = originalValue; // revert on failure
-                  logger.log('Error toggling like status', error: e);
-                }
-              },
-              tooltip: l10n.likedSongs,
-            ),
-          ],
-        ];
-
-        return Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: actions,
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildActionButton({
-    required BuildContext context,
-    required IconData icon,
-    required IconData activeIcon,
-    required ColorScheme colorScheme,
-    required double size,
-    required ValueNotifier<bool> statusNotifier,
-    required VoidCallback? onPressed,
-    Color? activeColor,
-    String? tooltip,
-  }) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: statusNotifier,
-      builder: (_, isActive, __) {
-        return IconButton(
-          icon: Icon(
-            isActive ? activeIcon : icon,
-            color: isActive
-                ? (activeColor ?? colorScheme.primary)
-                : colorScheme.onSurfaceVariant,
-          ),
-          iconSize: size,
-          tooltip: tooltip,
-          style: IconButton.styleFrom(
-            backgroundColor: isActive
-                ? (activeColor ?? colorScheme.primary).withValues(alpha: 0.15)
-                : Colors.transparent,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          onPressed: onPressed,
-        );
-      },
-    );
-  }
-
-  Widget _buildSimpleActionButton({
-    required BuildContext context,
-    required IconData icon,
-    required ColorScheme colorScheme,
-    required double size,
-    required VoidCallback onPressed,
-    String? tooltip,
-  }) {
-    return IconButton(
-      icon: Icon(icon, color: colorScheme.onSurfaceVariant),
-      iconSize: size,
-      tooltip: tooltip,
-      style: IconButton.styleFrom(
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            )
+          else
+            const SizedBox(width: 48),
+        ],
       ),
-      onPressed: onPressed,
-    );
-  }
-
-  Widget _buildSleepTimerButton(
-    BuildContext context,
-    ColorScheme colorScheme,
-    double size,
-  ) {
-    return ValueListenableBuilder<Duration?>(
-      valueListenable: sleepTimerNotifier,
-      builder: (_, value, __) {
-        final isActive = value != null;
-        return IconButton(
-          icon: Icon(
-            isActive
-                ? FluentIcons.timer_24_filled
-                : FluentIcons.timer_24_regular,
-            color: isActive
-                ? colorScheme.primary
-                : colorScheme.onSurfaceVariant,
-          ),
-          iconSize: size,
-          tooltip: context.l10n!.sleepTimer,
-          style: IconButton.styleFrom(
-            backgroundColor: isActive
-                ? colorScheme.primary.withValues(alpha: 0.15)
-                : Colors.transparent,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          onPressed: () {
-            if (isActive) {
-              audioHandler.cancelSleepTimer();
-              sleepTimerNotifier.value = null;
-              showToast(
-                context,
-                context.l10n!.sleepTimerCancelled,
-                duration: const Duration(seconds: 1, milliseconds: 500),
-              );
-            } else {
-              _showSleepTimerDialog(context);
-            }
-          },
-        );
-      },
     );
   }
 }
 
+List<PopupMenuEntry<String>> buildNowPlayingMoreMenuItems({
+  required BuildContext context,
+  required MediaItem metadata,
+}) {
+  final colorScheme = Theme.of(context).colorScheme;
+  final l10n = context.l10n!;
+  final isRadioStation = metadata.extras?['isLive'] == true;
+  final audioId = _audioIdFor(metadata);
+  final isOffline = isSongAlreadyOffline(audioId);
+  final isDownloading =
+      audioId != null && audioId.isNotEmpty && isSongDownloading(audioId);
+
+  return [
+    buildPopupMenuItem<String>(
+      value: 'share',
+      icon: FluentIcons.share_24_regular,
+      label: l10n.share,
+      colorScheme: colorScheme,
+    ),
+    if (!isRadioStation)
+      buildPopupMenuItem<String>(
+        value: 'offline',
+        icon: isOffline
+            ? FluentIcons.cloud_off_24_regular
+            : isDownloading
+            ? FluentIcons.arrow_download_24_regular
+            : FluentIcons.cloud_arrow_down_24_regular,
+        label: isOffline
+            ? l10n.removeOffline
+            : isDownloading
+            ? l10n.alreadyDownloading
+            : l10n.makeOffline,
+        colorScheme: colorScheme,
+      ),
+    buildPopupMenuItem<String>(
+      value: 'sleep_timer',
+      icon: FluentIcons.timer_24_regular,
+      label: l10n.sleepTimer,
+      colorScheme: colorScheme,
+    ),
+    if (!offlineMode.value && !isRadioStation)
+      buildPopupMenuItem<String>(
+        value: 'add_to_playlist',
+        icon: FluentIcons.album_add_24_regular,
+        label: l10n.addToPlaylist,
+        colorScheme: colorScheme,
+      ),
+    if (!isRadioStation)
+      buildPopupMenuItem<String>(
+        value: 'lyrics',
+        icon: FluentIcons.text_quote_24_regular,
+        label: l10n.lyrics,
+        colorScheme: colorScheme,
+      ),
+  ];
+}
+
+Future<void> handleNowPlayingMoreAction({
+  required BuildContext context,
+  required String value,
+  required MediaItem metadata,
+  required NowPlayingLyricsController lyricsController,
+}) async {
+  switch (value) {
+    case 'share':
+      await showSongSharePhotocard(context, metadata);
+      break;
+    case 'offline':
+      await _toggleOffline(context, _audioIdFor(metadata), metadata);
+      break;
+    case 'sleep_timer':
+      final active = sleepTimerNotifier.value != null;
+      if (active) {
+        audioHandler.cancelSleepTimer();
+        sleepTimerNotifier.value = null;
+        showToast(
+          context,
+          context.l10n!.sleepTimerCancelled,
+          duration: const Duration(seconds: 1, milliseconds: 500),
+        );
+      } else {
+        _showSleepTimerDialog(context);
+      }
+      break;
+    case 'add_to_playlist':
+      showAddToPlaylistDialog(
+        context,
+        song: mediaItemToMap(metadata),
+      );
+      break;
+    case 'lyrics':
+      lyricsController.toggle();
+      break;
+  }
+}
+
+String? _audioIdFor(MediaItem metadata) {
+  if (metadata.extras?['isLive'] == true) return metadata.id;
+  final ytid = metadata.extras?['ytid']?.toString().trim();
+  if (ytid != null && ytid.isNotEmpty) return ytid;
+  return metadata.id;
+}
+
 Future<void> _toggleOffline(
-  ValueNotifier<bool> status,
+  BuildContext context,
   String? audioId,
   MediaItem metadata,
 ) async {
-  final originalValue = status.value;
+  final originalValue = isSongAlreadyOffline(audioId);
 
   if (!originalValue &&
       audioId != null &&
       audioId.isNotEmpty &&
       isSongDownloading(audioId)) {
+    if (context.mounted) {
+      showToast(context, context.l10n!.alreadyDownloading);
+    }
     return;
   }
-
-  status.value = !originalValue;
 
   try {
     final bool success;
@@ -379,13 +248,11 @@ Future<void> _toggleOffline(
       );
     }
     if (!success) {
-      status.value = originalValue;
+      logger.log('Offline toggle failed for $audioId');
     }
   } on SongOfflineRateLimited {
-    status.value = originalValue;
     logger.log('Offline download rate limited for $audioId');
   } catch (e) {
-    status.value = originalValue;
     logger.log('Error toggling offline status', error: e);
   }
 }

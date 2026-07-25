@@ -21,6 +21,9 @@
 
 import 'package:audio_service/audio_service.dart';
 import 'package:wiyamusic/services/common_services.dart';
+import 'package:wiyamusic/services/io_service.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/artwork_provider.dart';
 
 Map mediaItemToMap(MediaItem mediaItem) {
   final extras = mediaItem.extras;
@@ -32,6 +35,7 @@ Map mediaItemToMap(MediaItem mediaItem) {
     'title': mediaItem.title,
     'artistId': extras?['artistId'],
     'videoAuthor': extras?['videoAuthor'],
+    'genre': extras?['genre'],
     'highResImage': extras?['highResImage'] ?? mediaItem.artUri.toString(),
     'lowResImage': extras?['lowResImage'],
     'isLive': extras?['isLive'] ?? false,
@@ -45,9 +49,30 @@ MediaItem mapToMediaItem(Map song) {
       : <String, dynamic>{};
   final isOffline = offlineSong.isNotEmpty;
 
-  final artUri = isOffline && offlineSong['artworkPath'] != null
-      ? Uri.file(offlineSong['artworkPath'].toString())
-      : Uri.parse(song['highResImage'].toString());
+  final localArtwork = _resolveLocalArtworkPath(
+    ytid: ytid,
+    song: song,
+    offlineSong: offlineSong,
+  );
+  final hasLocalArtwork = localArtwork != null;
+
+  // Never attach remote artwork for offline/downloaded playback. On iOS,
+  // audio_service tries to fetch artUri and fails hard without network
+  // (img.youtube.com host lookup), which contributes to stuck loading UI.
+  final Uri? artUri;
+  if (hasLocalArtwork) {
+    artUri = Uri.file(localArtwork);
+  } else if (isOffline || offlineMode.value) {
+    artUri = null;
+  } else {
+    final remote =
+        (song['highResImage'] ??
+                offlineSong['highResImage'] ??
+                song['lowResImage'] ??
+                '')
+            .toString();
+    artUri = remote.isEmpty ? null : Uri.tryParse(remote);
+  }
 
   return MediaItem(
     id: song['id'].toString(),
@@ -62,14 +87,34 @@ MediaItem mapToMediaItem(Map song) {
       'ytid': song['ytid'],
       'artistId': song['artistId'],
       'videoAuthor': song['videoAuthor'],
+      'genre': song['genre'],
       'isLive': song['isLive'],
       'highResImage': song['highResImage'],
-      'artWorkPath':
-          (isOffline ? offlineSong['artworkPath'] : song['highResImage'])
-              ?.toString() ??
-          '',
+      'artWorkPath': hasLocalArtwork
+          ? localArtwork
+          : (song['highResImage']?.toString() ?? ''),
     },
   );
+}
+
+String? _resolveLocalArtworkPath({
+  required String? ytid,
+  required Map song,
+  required Map<String, dynamic> offlineSong,
+}) {
+  final candidates = <String?>[
+    song['artworkPath']?.toString(),
+    offlineSong['artworkPath']?.toString(),
+    if (ytid != null && ytid.isNotEmpty) FilePaths.getArtworkPath(ytid),
+  ];
+
+  for (final candidate in candidates) {
+    if (candidate == null || candidate.isEmpty) continue;
+    if (ArtworkProvider.localFileExists(candidate)) {
+      return candidate.replaceFirst('file://', '');
+    }
+  }
+  return null;
 }
 
 /// Compares two Duration objects with tolerance for minor differences.

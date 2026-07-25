@@ -29,8 +29,26 @@ import 'package:flutter/widgets.dart';
 class ArtworkProvider {
   ArtworkProvider._();
 
+  static const AssetImage defaultArtwork = AssetImage(
+    'assets/images/default_artwork.png',
+  );
+
   // Cache by a short key so large base64 payloads aren't Map keys.
   static final Map<String, ImageProvider> _cache = {};
+
+  /// Returns true when [path] is a local file path that currently exists.
+  static bool localFileExists(String? path) {
+    if (kIsWeb || path == null || path.isEmpty) return false;
+    final normalized = path.replaceFirst('file://', '');
+    if (!(normalized.startsWith('/') || path.startsWith('file://'))) {
+      return false;
+    }
+    try {
+      return File(normalized).existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
 
   static ImageProvider get(String artwork) {
     if (artwork.isEmpty) throw ArgumentError('artwork must not be empty');
@@ -50,12 +68,18 @@ class ArtworkProvider {
       } else if (!kIsWeb &&
           (artwork.startsWith('file://') || artwork.startsWith('/'))) {
         final path = artwork.replaceFirst('file://', '');
-        provider = FileImage(File(path));
+        final file = File(path);
+        // Skip FileImage when the offline artwork was deleted / never saved —
+        // FileImage throws PathNotFoundException while resolving the codec.
+        if (!file.existsSync()) {
+          return defaultArtwork;
+        }
+        provider = FileImage(file);
       } else {
         provider = AssetImage(artwork);
       }
     } catch (_) {
-      provider = const AssetImage('assets/placeholder.png');
+      return defaultArtwork;
     }
 
     _cache[cacheKey] = provider;

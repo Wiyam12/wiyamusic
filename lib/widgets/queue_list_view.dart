@@ -28,6 +28,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/utilities/artwork_provider.dart';
 import 'package:wiyamusic/widgets/confirmation_dialog.dart';
 import 'package:wiyamusic/widgets/no_artwork_cube.dart';
 
@@ -498,11 +499,11 @@ class _ArtworkThumbnail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final artworkPath = song['artworkPath'] as String?;
-    if (artworkPath != null && artworkPath.isNotEmpty) {
+    if (ArtworkProvider.localFileExists(artworkPath)) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(radius),
         child: Image.file(
-          File(artworkPath),
+          File(artworkPath!),
           width: size,
           height: size,
           fit: BoxFit.cover,

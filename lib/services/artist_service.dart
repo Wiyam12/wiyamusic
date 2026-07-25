@@ -179,6 +179,27 @@ Future<Map<String, dynamic>?> resolveArtist(
   return artist;
 }
 
+/// Reads a previously cached artist catalog straight from local storage,
+/// without any network resolve step. Returns null when nothing is cached.
+Future<Map<String, dynamic>?> getCachedArtistCatalog(String artistId) async {
+  try {
+    final cacheKey = 'artist_catalog_v${artistCatalogCacheVersion}_$artistId';
+    final cachedArtist = await getData('cache', cacheKey);
+    if (cachedArtist is Map &&
+        cachedArtist['list'] is List &&
+        (cachedArtist['list'] as List).isNotEmpty) {
+      return Map<String, dynamic>.from(cachedArtist);
+    }
+  } catch (e, stackTrace) {
+    logger.log(
+      'Error reading cached artist catalog for $artistId',
+      error: e,
+      stackTrace: stackTrace,
+    );
+  }
+  return null;
+}
+
 Future<Map<String, dynamic>?> getArtistCatalog(
   String artistId, {
   bool forceRefresh = false,
@@ -189,6 +210,15 @@ Future<Map<String, dynamic>?> getArtistCatalog(
   bool preferredVerified = false,
 }) async {
   try {
+    // Cache-first by the raw lookup id so a liked/opened artist still loads
+    // when the network resolve step is unavailable (e.g. no connection).
+    if (!forceRefresh) {
+      final cachedByLookup = await getCachedArtistCatalog(artistId);
+      if (cachedByLookup != null) {
+        return cachedByLookup;
+      }
+    }
+
     final artist = await resolveArtist(
       artistId,
       preferredName: preferredName,

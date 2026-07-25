@@ -33,6 +33,7 @@ import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/theme/design_tokens.dart';
 import 'package:wiyamusic/utilities/app_utils.dart';
+import 'package:wiyamusic/utilities/artwork_contrast.dart';
 import 'package:wiyamusic/utilities/artwork_provider.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/offline_playlist_dialogs.dart';
@@ -40,8 +41,6 @@ import 'package:wiyamusic/utilities/playlist_utils.dart';
 import 'package:wiyamusic/utilities/song_filtering.dart';
 import 'package:wiyamusic/utilities/sort_utils.dart';
 import 'package:wiyamusic/widgets/bottom_sheet_bar.dart';
-import 'package:wiyamusic/widgets/confirmation_dialog.dart';
-import 'package:wiyamusic/widgets/edit_playlist_dialog.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
 import 'package:wiyamusic/widgets/playlist_page/empty_playlist_state.dart';
 import 'package:wiyamusic/widgets/playlist_page/search_bar_section.dart';
@@ -50,6 +49,9 @@ import 'package:wiyamusic/widgets/sort_chips.dart';
 import 'package:wiyamusic/widgets/spinner.dart';
 
 enum PlaylistSortType { default_, title, artist, dateAdded }
+
+/// Tall enough for a 2-line FlexibleSpaceBar title when the app bar is pinned.
+const double _playlistCollapsedToolbarHeight = 76;
 
 class PlaylistPage extends StatefulWidget {
   const PlaylistPage({
@@ -93,6 +95,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
   final ValueNotifier<String> _searchQueryNotifier = ValueNotifier('');
   late final TextEditingController _searchController;
   late final FocusNode _searchFocusNode;
+
+  /// True when the header artwork's top strip is bright (needs dark icons).
+  bool _isTopRegionLight = false;
+  double _headerExpandProgress = 1;
+  String? _sampledImageUrl;
 
   List<dynamic> _getSourceList(String searchQuery) {
     final list = _playlist?['list'] as List<dynamic>? ?? [];
@@ -143,17 +150,40 @@ class _PlaylistPageState extends State<PlaylistPage> {
         final shouldFetchInitialPlaylist =
             playlistList == null || (!widget.isArtist && playlistList.isEmpty);
         if (shouldFetchInitialPlaylist && resolvedId != null) {
-          _playlist =
-              await getPlaylistInfoForWidget(
-                resolvedId,
-                isArtist: widget.isArtist,
-                artistName: initialPlaylist?['title']?.toString(),
-                artistImage: initialPlaylist?['image']?.toString(),
-                sourceSongId: initialPlaylist?['sourceSongId']?.toString(),
-                sourceVideoAuthor: initialPlaylist?['videoAuthor']?.toString(),
-                preferredVerified: initialPlaylist?['isVerifiedArtist'] == true,
-              ) ??
-              initialPlaylist;
+          // Hydrate from local liked/song cache before any network call so
+          // saved playlists/albums still open without internet.
+          final localCached = await getPlaylistInfoForWidget(
+            resolvedId,
+            isArtist: widget.isArtist,
+            artistName: initialPlaylist?['title']?.toString(),
+            artistImage: initialPlaylist?['image']?.toString(),
+            sourceSongId: initialPlaylist?['sourceSongId']?.toString(),
+            sourceVideoAuthor: initialPlaylist?['videoAuthor']?.toString(),
+            preferredVerified: initialPlaylist?['isVerifiedArtist'] == true,
+            localOnly: true,
+          );
+
+          final localList = localCached?['list'] as List?;
+          if (localCached != null &&
+              localList != null &&
+              localList.isNotEmpty) {
+            _playlist = localCached;
+          } else {
+            _playlist =
+                await getPlaylistInfoForWidget(
+                  resolvedId,
+                  isArtist: widget.isArtist,
+                  artistName: initialPlaylist?['title']?.toString(),
+                  artistImage: initialPlaylist?['image']?.toString(),
+                  sourceSongId: initialPlaylist?['sourceSongId']?.toString(),
+                  sourceVideoAuthor: initialPlaylist?['videoAuthor']
+                      ?.toString(),
+                  preferredVerified:
+                      initialPlaylist?['isVerifiedArtist'] == true,
+                ) ??
+                localCached ??
+                initialPlaylist;
+          }
         }
       } else {
         _playlist = await getPlaylistInfoForWidget(
@@ -165,6 +195,32 @@ class _PlaylistPageState extends State<PlaylistPage> {
           sourceVideoAuthor: initialPlaylist?['videoAuthor']?.toString(),
           preferredVerified: initialPlaylist?['isVerifiedArtist'] == true,
         );
+      }
+
+      // Search results identify albums through route metadata. Preserve that
+      // classification when hydration replaces the initial lightweight map.
+      if (_playlist is Map &&
+          initialPlaylist is Map &&
+          initialPlaylist['isAlbum'] == true) {
+        _playlist = <dynamic, dynamic>{...(_playlist as Map), 'isAlbum': true};
+      }
+
+      final genre = initialPlaylist?['genre']?.toString().trim();
+      if (_playlist != null && genre != null && genre.isNotEmpty) {
+        final songs = (_playlist['list'] as List? ?? const [])
+            .whereType<Map>()
+            .map(
+              (song) => <dynamic, dynamic>{
+                ...song,
+                'genre': song['genre'] ?? genre,
+              },
+            )
+            .toList();
+        _playlist = <dynamic, dynamic>{
+          ...(_playlist as Map),
+          'genre': genre,
+          'list': songs,
+        };
       }
 
       if (_playlist != null && _playlist['list'] != null) {
@@ -185,8 +241,44 @@ class _PlaylistPageState extends State<PlaylistPage> {
       _isInitializingPlaylist = false;
       if (mounted) {
         setState(() {});
+        unawaited(_updateHeaderContrast());
       }
     }
+  }
+
+  Future<void> _updateHeaderContrast() async {
+    final imageUrl = widget.isArtist
+        ? normalizeArtistThumbnailUrl(_playlist?['image']?.toString())
+        : _playlist?['image']?.toString();
+    if (_sampledImageUrl == imageUrl) return;
+    _sampledImageUrl = imageUrl;
+
+    final isLight = await isArtworkTopRegionLight(imageUrl);
+    if (!mounted || _sampledImageUrl != imageUrl) return;
+    if (_isTopRegionLight == isLight) return;
+    setState(() => _isTopRegionLight = isLight);
+  }
+
+  bool _handleHeaderScroll(ScrollNotification notification) {
+    final expandedHeight = MediaQuery.sizeOf(context).height * 0.38;
+    final collapseRange = (expandedHeight - _playlistCollapsedToolbarHeight)
+        .clamp(1.0, double.infinity);
+    final progress = (1 - (notification.metrics.pixels / collapseRange)).clamp(
+      0.0,
+      1.0,
+    );
+    if ((progress - _headerExpandProgress).abs() > 0.02) {
+      setState(() => _headerExpandProgress = progress);
+    }
+    return false;
+  }
+
+  Color _headerForegroundColor(ColorScheme colorScheme) {
+    return playlistHeaderForegroundColor(
+      isTopRegionLight: _isTopRegionLight,
+      collapsedColor: colorScheme.onSurface,
+      expandProgress: _headerExpandProgress,
+    );
   }
 
   @override
@@ -226,92 +318,107 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final imageUrl = widget.isArtist
         ? normalizeArtistThumbnailUrl(_playlist['image']?.toString())
         : _playlist['image']?.toString();
+    final headerForeground = _headerForegroundColor(colorScheme);
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: expandedHeight,
-            pinned: true,
-            stretch: true,
-            backgroundColor: colorScheme.surface,
-            foregroundColor: Colors.white,
-            leading: IconButton(
-              icon: const Icon(FluentIcons.arrow_left_24_regular),
-              onPressed: () =>
-                  Navigator.pop(context, widget.playlistData == _playlist),
-              tooltip: context.l10n!.back,
-            ),
-            actions: _buildAppBarActions(),
-            flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.fromLTRB(48, 0, 48, 16),
-              centerTitle: true,
-              title: Text(
-                playlistTitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.6,
-                  height: 1.05,
+      body: NotificationListener<ScrollNotification>(
+        onNotification: _handleHeaderScroll,
+        child: CustomScrollView(
+          slivers: [
+            SliverAppBar(
+              expandedHeight: expandedHeight,
+              pinned: true,
+              stretch: true,
+              toolbarHeight: _playlistCollapsedToolbarHeight,
+              collapsedHeight: _playlistCollapsedToolbarHeight,
+              backgroundColor: colorScheme.surface,
+              foregroundColor: headerForeground,
+              iconTheme: IconThemeData(color: headerForeground),
+              actionsIconTheme: IconThemeData(color: headerForeground),
+              leading: IconButton(
+                icon: Icon(
+                  FluentIcons.arrow_left_24_regular,
+                  color: headerForeground,
                 ),
+                onPressed: () =>
+                    Navigator.pop(context, widget.playlistData == _playlist),
+                tooltip: context.l10n!.back,
               ),
-              background: _PlaylistHeaderBackground(
-                imageUrl: imageUrl,
-                cubeIcon: widget.cubeIcon,
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(child: _buildControlsSection()),
-          if ((_playlist['list'] as List? ?? const []).isNotEmpty)
-            ValueListenableBuilder<String>(
-              valueListenable: _searchQueryNotifier,
-              builder: (context, searchQuery, _) {
-                final sourceList = _getSourceList(searchQuery);
-                return SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  sliver: SliverList.builder(
-                    itemCount: sourceList.length,
-                    itemBuilder: (context, index) {
-                      final isRemovable = _playlist['source'] == 'user-created';
-                      return _buildSongListItem(
-                        sourceList[index],
-                        index,
-                        isRemovable,
-                      );
-                    },
+              actions: _buildAppBarActions(headerForeground),
+              flexibleSpace: FlexibleSpaceBar(
+                // fontSize below is the collapsed size; expanded scales it up.
+                expandedTitleScale: 1.45,
+                titlePadding: const EdgeInsets.fromLTRB(52, 0, 52, 12),
+                centerTitle: true,
+                title: Text(
+                  playlistTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    // Always white: the title sits on the dark header fade.
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                    height: 1.15,
                   ),
-                );
-              },
-            )
-          else if (_isArtistCatalogLoading)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(
-                child: SizedBox(
-                  height: MediaQuery.sizeOf(context).height * 0.3,
-                  child: const Spinner(),
+                ),
+                background: _PlaylistHeaderBackground(
+                  imageUrl: imageUrl,
+                  cubeIcon: widget.cubeIcon,
                 ),
               ),
-            )
-          else if (_isArtistCatalogFailed)
-            EmptyPlaylistState(message: context.l10n!.error)
-          else
-            EmptyPlaylistState(message: context.l10n!.noSongsInPlaylist),
-          const SliverMiniPlayerBottomSpace(),
-        ],
+            ),
+            SliverToBoxAdapter(child: _buildControlsSection()),
+            if ((_playlist['list'] as List? ?? const []).isNotEmpty)
+              ValueListenableBuilder<String>(
+                valueListenable: _searchQueryNotifier,
+                builder: (context, searchQuery, _) {
+                  final sourceList = _getSourceList(searchQuery);
+                  return SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    sliver: SliverList.builder(
+                      itemCount: sourceList.length,
+                      itemBuilder: (context, index) {
+                        final isRemovable =
+                            _playlist['source'] == 'user-created';
+                        return _buildSongListItem(
+                          sourceList[index],
+                          index,
+                          isRemovable,
+                        );
+                      },
+                    ),
+                  );
+                },
+              )
+            else if (_isArtistCatalogLoading)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: SizedBox(
+                    height: MediaQuery.sizeOf(context).height * 0.3,
+                    child: const Spinner(),
+                  ),
+                ),
+              )
+            else if (_isArtistCatalogFailed)
+              EmptyPlaylistState(message: context.l10n!.error)
+            else
+              EmptyPlaylistState(message: context.l10n!.noSongsInPlaylist),
+            const SliverMiniPlayerBottomSpace(),
+          ],
+        ),
       ),
     );
   }
 
-  List<Widget> _buildAppBarActions() {
+  List<Widget> _buildAppBarActions(Color foreground) {
     return [
       IconButton(
-        icon: const Icon(FluentIcons.more_vertical_24_regular),
+        icon: Icon(FluentIcons.more_vertical_24_regular, color: foreground),
         onPressed: _showPlaylistOptionsSheet,
       ),
     ];
@@ -319,13 +426,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   void _showPlaylistOptionsSheet() {
     final colorScheme = Theme.of(context).colorScheme;
-    final isUserCreated = _playlist['source'] == 'user-created';
     final songs = _playlist['list'] as List? ?? [];
     final playlistId = _playlist?['ytid']?.toString() ?? widget.playlistId;
     final isOffline =
         playlistId != null &&
         playlistId.isNotEmpty &&
         isPlaylistFullyOffline(songs);
+    final isLiked = playlistLikeStatus.value;
 
     showModalBottomSheet<void>(
       context: context,
@@ -344,46 +451,137 @@ class _PlaylistPageState extends State<PlaylistPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 BottomSheetBar(
-                  context.l10n!.editPlaylist,
+                  isLiked
+                      ? context.l10n!.removeFromLikedPlaylists
+                      : context.l10n!.addToLikedPlaylists,
                   () {
                     Navigator.pop(sheetContext);
-                    if (!isUserCreated) {
+                    if (playlistId == null || playlistId.isEmpty) {
                       showToast(context, context.l10n!.error);
                       return;
                     }
-                    unawaited(_editPlaylist());
+                    final nextLiked = !playlistLikeStatus.value;
+                    playlistLikeStatus.value = nextLiked;
+
+                    Map<String, dynamic>? playlistData;
+                    if (_playlist is Map) {
+                      playlistData = Map<String, dynamic>.from(
+                        (_playlist as Map).map(
+                          (key, value) => MapEntry(key.toString(), value),
+                        ),
+                      );
+                      playlistData['ytid'] = playlistId;
+                    } else {
+                      playlistData = {'ytid': playlistId};
+                    }
+
+                    unawaited(
+                      updatePlaylistLikeStatus(
+                        playlistId,
+                        nextLiked,
+                        playlistData: playlistData,
+                      ),
+                    );
                   },
                   false,
-                  icon: FluentIcons.edit_24_regular,
+                  icon: isLiked
+                      ? FluentIcons.heart_off_24_regular
+                      : FluentIcons.heart_24_regular,
                 ),
-                BottomSheetBar(
-                  context.l10n!.deletePlaylist,
-                  () {
-                    Navigator.pop(sheetContext);
-                    _confirmDeletePlaylist();
-                  },
-                  false,
-                  icon: FluentIcons.delete_24_regular,
-                ),
-                BottomSheetBar(
-                  isOffline
-                      ? context.l10n!.removeOffline
-                      : context.l10n!.downloadPlaylist,
-                  () {
-                    Navigator.pop(sheetContext);
-                    _handleDownloadAction();
-                  },
-                  false,
-                  icon: isOffline
-                      ? FluentIcons.arrow_download_off_24_regular
-                      : FluentIcons.arrow_download_24_regular,
-                ),
+                if (playlistId != null && playlistId.isNotEmpty)
+                  _buildDownloadSheetAction(
+                    sheetContext: sheetContext,
+                    playlistId: playlistId,
+                    songs: songs,
+                    isOffline: isOffline,
+                  ),
               ],
             ),
           ),
         );
       },
     );
+  }
+
+  Widget _buildDownloadSheetAction({
+    required BuildContext sheetContext,
+    required String playlistId,
+    required List songs,
+    required bool isOffline,
+  }) {
+    final progressNotifier = offlinePlaylistService.getProgressNotifier(
+      playlistId,
+    );
+
+    return ValueListenableBuilder<DownloadProgress>(
+      valueListenable: progressNotifier,
+      builder: (context, progress, _) {
+        final isDownloading = offlinePlaylistService.isPlaylistDownloading(
+          playlistId,
+        );
+        final processed = progress.completed + progress.failed;
+        final total = progress.total > 0 ? progress.total : songs.length;
+
+        final String title;
+        final IconData icon;
+        if (isDownloading) {
+          title = progress.isCancelled
+              ? context.l10n!.cancellingDownload
+              : '$processed/$total';
+          icon = FluentIcons.dismiss_circle_24_regular;
+        } else if (isOffline) {
+          title = context.l10n!.removeOffline;
+          icon = FluentIcons.arrow_download_off_24_regular;
+        } else {
+          title = context.l10n!.downloadPlaylist;
+          icon = FluentIcons.arrow_download_24_regular;
+        }
+
+        return BottomSheetBar(
+          title,
+          () {
+            if (isDownloading) {
+              if (!progress.isCancelled) {
+                unawaited(
+                  offlinePlaylistService.cancelDownload(context, playlistId),
+                );
+              }
+              return;
+            }
+
+            if (isOffline) {
+              Navigator.pop(sheetContext);
+              _showRemoveOfflineDialog(playlistId);
+              return;
+            }
+
+            // Keep the sheet open so progress ($completed/$total) updates live.
+            _startPlaylistDownload(playlistId);
+          },
+          isDownloading,
+          icon: icon,
+        );
+      },
+    );
+  }
+
+  void _startPlaylistDownload(String playlistId) {
+    final songs = _playlist?['list'] as List? ?? [];
+    if (songs.isEmpty) {
+      showToast(context, context.l10n!.noSongsInPlaylist);
+      return;
+    }
+
+    if (offlineMode.value) {
+      showToast(context, context.l10n!.offlineMode);
+      return;
+    }
+
+    if (offlinePlaylistService.isPlaylistDownloading(playlistId)) {
+      return;
+    }
+
+    unawaited(offlinePlaylistService.downloadPlaylist(context, _playlist));
   }
 
   Widget _buildControlsSection() {
@@ -493,148 +691,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
     );
   }
 
-  Future<void> _editPlaylist() async {
-    final result = await showDialog<Map?>(
-      context: context,
-      builder: (context) => EditPlaylistDialog(playlistData: _playlist),
-    );
-
-    if (result == null) return;
-
-    final resolvedPlaylistYtid =
-        _playlist['ytid']?.toString() ?? widget.playlistId;
-    if (resolvedPlaylistYtid == null ||
-        resolvedPlaylistYtid.isEmpty ||
-        resolvedPlaylistYtid == 'null') {
-      showToast(context, context.l10n!.error);
-      return;
-    }
-
-    final updatedPlaylist = {
-      ..._playlist,
-      ...result,
-      'ytid': resolvedPlaylistYtid,
-      'source': _playlist['source'] ?? result['source'],
-      'list': result['list'] ?? _playlist['list'],
-    };
-
-    final rootIndex = userCustomPlaylists.value.indexWhere(
-      (p) => p['ytid'] == resolvedPlaylistYtid,
-    );
-
-    if (rootIndex != -1) {
-      final updatedPlaylists = List<Map>.from(userCustomPlaylists.value);
-      updatedPlaylists[rootIndex] = updatedPlaylist;
-      userCustomPlaylists.value = updatedPlaylists;
-      unawaited(
-        addOrUpdateData<List>(
-          'user',
-          'customPlaylists',
-          userCustomPlaylists.value,
-        ),
-      );
-    } else {
-      final updatedFolders = List<Map>.from(userPlaylistFolders.value);
-      for (final folder in updatedFolders) {
-        final folderPlaylists = List<Map>.from(
-          folder['playlists'] as List? ?? [],
-        );
-        final fi = folderPlaylists.indexWhere(
-          (p) => p['ytid'] == resolvedPlaylistYtid,
-        );
-        if (fi != -1) {
-          folderPlaylists[fi] = updatedPlaylist;
-          folder['playlists'] = folderPlaylists;
-          break;
-        }
-      }
-      userPlaylistFolders.value = updatedFolders;
-      unawaited(
-        addOrUpdateData<List>(
-          'user',
-          'playlistFolders',
-          userPlaylistFolders.value,
-        ),
-      );
-    }
-
-    unawaited(syncOfflinePlaylistMetadata(updatedPlaylist));
-    setState(() => _playlist = updatedPlaylist);
-    showToast(context, context.l10n!.playlistUpdated);
-  }
-
-  void _confirmDeletePlaylist() {
-    final isUserCreated = _playlist['source'] == 'user-created';
-    final isUserYoutube = _playlist['source'] == 'user-youtube';
-
-    if (!isUserCreated && !isUserYoutube) {
-      showToast(context, context.l10n!.error);
-      return;
-    }
-
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return ConfirmationDialog(
-          confirmationMessage: context.l10n!.removePlaylistQuestion,
-          submitMessage: context.l10n!.delete,
-          onCancel: () => Navigator.of(dialogContext).pop(),
-          onSubmit: () {
-            Navigator.of(dialogContext).pop();
-            final playlistId = _playlist['ytid']?.toString() ?? '';
-            if (playlistId.isEmpty) {
-              showToast(context, context.l10n!.error);
-              return;
-            }
-
-            removeUserPlaylistEntry(
-              Map<String, dynamic>.from(_playlist as Map),
-            );
-            if (offlinePlaylistService.isPlaylistDownloaded(playlistId)) {
-              unawaited(
-                offlinePlaylistService.removeOfflinePlaylist(playlistId),
-              );
-            }
-            if (mounted) {
-              Navigator.of(context).pop(true);
-            }
-          },
-        );
-      },
-    );
-  }
-
-  void _handleDownloadAction() {
-    final playlistId = _playlist?['ytid']?.toString() ?? widget.playlistId;
-    if (playlistId == null || playlistId.isEmpty) {
-      showToast(context, context.l10n!.error);
-      return;
-    }
-
-    final songs = _playlist?['list'] as List? ?? [];
-    if (songs.isEmpty) {
-      showToast(context, context.l10n!.noSongsInPlaylist);
-      return;
-    }
-
-    if (isPlaylistFullyOffline(songs)) {
-      _showRemoveOfflineDialog(playlistId);
-      return;
-    }
-
-    if (offlineMode.value) {
-      showToast(context, context.l10n!.offlineMode);
-      return;
-    }
-
-    if (offlinePlaylistService.isPlaylistDownloading(playlistId)) {
-      offlinePlaylistService.cancelDownload(context, playlistId);
-      return;
-    }
-
-    unawaited(offlinePlaylistService.downloadPlaylist(context, _playlist));
-  }
-
   void _showRemoveOfflineDialog(String playlistId) =>
       showRemoveOfflinePlaylistDialog(context, playlistId);
 
@@ -740,6 +796,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       borderRadius: borderRadius,
       playlistId: playlistId,
       onRenamed: () => setState(() {}),
+      showPlayingIndicator: true,
     );
   }
 }

@@ -5,21 +5,24 @@ import 'package:wiyamusic/constants/app_constants.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/services/common_services.dart';
-import 'package:wiyamusic/services/listening_stats_service.dart';
+// import 'package:wiyamusic/services/listening_stats_service.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/theme/design_tokens.dart';
 import 'package:wiyamusic/utilities/app_utils.dart';
+import 'package:wiyamusic/utilities/artwork_provider.dart';
 import 'package:wiyamusic/utilities/async_loader.dart';
-import 'package:wiyamusic/utilities/listening_stats_utils.dart';
+// import 'package:wiyamusic/utilities/listening_stats_utils.dart';
 import 'package:wiyamusic/widgets/announcement_box.dart';
 import 'package:wiyamusic/widgets/home/home_featured_hero.dart';
 import 'package:wiyamusic/widgets/home/home_media_card.dart';
 import 'package:wiyamusic/widgets/home/home_section_header.dart';
-import 'package:wiyamusic/widgets/listening_recap_card.dart';
+// import 'package:wiyamusic/widgets/listening_recap_card.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
+import 'package:wiyamusic/widgets/pinned_sliver_header.dart';
 import 'package:wiyamusic/widgets/search_entry_bar.dart';
-import 'package:wiyamusic/widgets/section_header.dart';
+// import 'package:wiyamusic/widgets/section_header.dart';
 import 'package:wiyamusic/widgets/song_bar.dart';
 
 class HomePage extends StatefulWidget {
@@ -60,46 +63,64 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // appBar: AppBar(title: const Text('WiyaMusic.')),
-      body: SingleChildScrollView(
-        padding: commonSingleChildScrollViewPadding,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SearchEntryBar(hintText: 'Search songs, artists, albums...'),
-            ValueListenableBuilder<String?>(
-              valueListenable: announcementURL,
-              builder: (_, url, __) {
-                if (url == null) return const SizedBox.shrink();
-                final isSponsorshipAnnouncement = isSponsorshipAnnouncementUrl(
-                  url,
-                );
-                final message = isSponsorshipAnnouncement
-                    ? context.l10n!.sponsorProject
-                    : context.l10n!.newAnnouncement;
-                final icon = isSponsorshipAnnouncement
-                    ? FluentIcons.heart_24_filled
-                    : FluentIcons.megaphone_24_filled;
+    final topInset = MediaQuery.paddingOf(context).top;
+    // CustomSearchBar: vertical padding 16*2 + SearchBar minHeight 45.
+    const searchBarBodyHeight = 77.0;
+    final stickyHeight = topInset + searchBarBodyHeight;
 
-                return AnnouncementBox(
-                  message: message,
-                  url: url,
-                  icon: icon,
-                  onDismiss: () async {
-                    announcementURL.value = null;
-                  },
-                );
-              },
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          PinnedSliverHeader(
+            height: stickyHeight,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                10,
+                topInset,
+                10,
+                0,
+              ),
+              child: const SearchEntryBar(
+                hintText: 'Search songs, artists, albums...',
+              ),
             ),
-            _buildFeaturedHero(),
-            _buildRecentlyPlayedSection(),
-            _buildMadeForYouSection(),
-            _buildCurrentMonthRecapSection(),
-            _buildRecommendedSongsSection(),
-            const MiniPlayerBottomSpace(),
-          ],
-        ),
+          ),
+          SliverPadding(
+            padding: commonSingleChildScrollViewPadding,
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                ValueListenableBuilder<String?>(
+                  valueListenable: announcementURL,
+                  builder: (_, url, __) {
+                    if (url == null) return const SizedBox.shrink();
+                    final isSponsorshipAnnouncement =
+                        isSponsorshipAnnouncementUrl(url);
+                    final message = isSponsorshipAnnouncement
+                        ? context.l10n!.sponsorProject
+                        : context.l10n!.newAnnouncement;
+                    final icon = isSponsorshipAnnouncement
+                        ? FluentIcons.heart_24_filled
+                        : FluentIcons.megaphone_24_filled;
+
+                    return AnnouncementBox(
+                      message: message,
+                      url: url,
+                      icon: icon,
+                      onDismiss: () async {
+                        announcementURL.value = null;
+                      },
+                    );
+                  },
+                ),
+                _buildFeaturedHero(),
+                _buildRecentlyPlayedSection(),
+                _buildMadeForYouSection(),
+                _buildRecommendedSongsSection(),
+              ]),
+            ),
+          ),
+          const SliverMiniPlayerBottomSpace(),
+        ],
       ),
     );
   }
@@ -126,7 +147,11 @@ class _HomePageState extends State<HomePage> {
       valueListenable: userRecentlyPlayed,
       builder: (context, songs, _) {
         if (songs.isEmpty) return const SizedBox.shrink();
-        final items = songs.take(_horizontalCardLimit).toList();
+        final queue = songs
+            .whereType<Map>()
+            .map((song) => Map<String, dynamic>.from(song))
+            .toList(growable: false);
+        final items = queue.take(_horizontalCardLimit).toList();
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -143,13 +168,13 @@ class _HomePageState extends State<HomePage> {
                 itemCount: items.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 12),
                 itemBuilder: (context, index) {
-                  final song = Map<String, dynamic>.from(items[index] as Map);
+                  final song = items[index];
                   return HomeMediaCard(
                     title: song['title']?.toString() ?? '',
                     subtitle: song['artist']?.toString(),
                     imageUrl: _songImage(song),
-                    onTap: () => audioHandler.playSong(song),
-                    onPlay: () => audioHandler.playSong(song),
+                    onTap: () => _playRecentlyPlayedAt(queue, index),
+                    onPlay: () => _playRecentlyPlayedAt(queue, index),
                   );
                 },
               ),
@@ -157,6 +182,23 @@ class _HomePageState extends State<HomePage> {
           ],
         );
       },
+    );
+  }
+
+  Future<void> _playRecentlyPlayedAt(
+    List<Map<String, dynamic>> queue,
+    int songIndex,
+  ) async {
+    if (queue.isEmpty) return;
+    final safeIndex = songIndex.clamp(0, queue.length - 1);
+    await audioHandler.playPlaylistSong(
+      playlist: {
+        'ytid': '',
+        'title': context.l10n!.recentlyPlayed,
+        'source': 'user-created',
+        'list': queue,
+      },
+      songIndex: safeIndex,
     );
   }
 
@@ -240,71 +282,72 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildCurrentMonthRecapSection() {
-    return ValueListenableBuilder<bool>(
-      valueListenable: wrappedEnabled,
-      builder: (_, isEnabled, __) {
-        if (!isEnabled) return const SizedBox.shrink();
-
-        final currentMonthKey = listeningStatsMonthKey(DateTime.now());
-        final monthStats = listeningStatsService.monthStats(currentMonthKey);
-        final songs = listeningStatsService.monthTopSongs(currentMonthKey);
-        final displayMinutes = monthDisplayMinutes(monthStats);
-        if (displayMinutes <= 0 && songs.isEmpty) {
-          return const SizedBox.shrink();
-        }
-
-        final previewSongs = songs.take(wrappedShareSongsLimit).toList();
-        final periodLabel = formatMonthPeriodLabel(
-          Localizations.localeOf(context),
-          currentMonthKey,
-        );
-
-        return Column(
-          children: [
-            SectionHeader(
-              title: context.l10n!.timeMachine,
-              icon: FluentIcons.data_trending_24_filled,
-            ),
-            ListeningRecapCard(
-              periodLabel: periodLabel,
-              minutes: displayMinutes,
-              songs: previewSongs,
-              onSongTap: (index) => _playRecapSongs(previewSongs, index),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonalIcon(
-                  onPressed: () => context.push('/home/timeMachine'),
-                  icon: const Icon(FluentIcons.arrow_right_24_regular),
-                  label: Text(context.l10n!.listeningStats),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _playRecapSongs(
-    List<Map<String, dynamic>> songs,
-    int index,
-  ) async {
-    if (songs.isEmpty) return;
-    await audioHandler.playPlaylistSong(
-      playlist: {'title': context.l10n!.timeMachine, 'list': songs},
-      songIndex: index,
-    );
-  }
+  // Widget _buildCurrentMonthRecapSection() {
+  //   return ValueListenableBuilder<bool>(
+  //     valueListenable: wrappedEnabled,
+  //     builder: (_, isEnabled, __) {
+  //       if (!isEnabled) return const SizedBox.shrink();
+  //
+  //       final currentMonthKey = listeningStatsMonthKey(DateTime.now());
+  //       final monthStats = listeningStatsService.monthStats(currentMonthKey);
+  //       final songs = listeningStatsService.monthTopSongs(currentMonthKey);
+  //       final displayMinutes = monthDisplayMinutes(monthStats);
+  //       if (displayMinutes <= 0 && songs.isEmpty) {
+  //         return const SizedBox.shrink();
+  //       }
+  //
+  //       final previewSongs = songs.take(wrappedShareSongsLimit).toList();
+  //       final periodLabel = formatMonthPeriodLabel(
+  //         Localizations.localeOf(context),
+  //         currentMonthKey,
+  //       );
+  //
+  //       return Column(
+  //         children: [
+  //           SectionHeader(
+  //             title: context.l10n!.timeMachine,
+  //             icon: FluentIcons.data_trending_24_filled,
+  //           ),
+  //           ListeningRecapCard(
+  //             periodLabel: periodLabel,
+  //             minutes: displayMinutes,
+  //             songs: previewSongs,
+  //             onSongTap: (index) => _playRecapSongs(previewSongs, index),
+  //           ),
+  //           Padding(
+  //             padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
+  //             child: SizedBox(
+  //               width: double.infinity,
+  //               child: FilledButton.tonalIcon(
+  //                 onPressed: () => context.push('/home/timeMachine'),
+  //                 icon: const Icon(FluentIcons.arrow_right_24_regular),
+  //                 label: Text(context.l10n!.listeningStats),
+  //               ),
+  //             ),
+  //           ),
+  //         ],
+  //       );
+  //     },
+  //   );
+  // }
+  //
+  // Future<void> _playRecapSongs(
+  //   List<Map<String, dynamic>> songs,
+  //   int index,
+  // ) async {
+  //   if (songs.isEmpty) return;
+  //   await audioHandler.playPlaylistSong(
+  //     playlist: {'title': context.l10n!.timeMachine, 'list': songs},
+  //     songIndex: index,
+  //   );
+  // }
 
   Widget _buildRecommendedForYouSection(
     BuildContext context,
     List<dynamic> data,
   ) {
     final recommendedTitle = context.l10n!.suggestedPlaylists;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Column(
       children: [
@@ -318,18 +361,33 @@ class _HomePageState extends State<HomePage> {
             );
           },
         ),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: data.length,
-          padding: commonListViewBottomPadding,
-          itemBuilder: (context, index) {
-            final borderRadius = getItemBorderRadius(index, data.length);
-            return RepaintBoundary(
-              key: listItemKey('home_recommended', index, data[index]),
-              child: SongBar(data[index], true, borderRadius: borderRadius),
-            );
-          },
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(WiyaDesign.cornerRadius),
+            border: Border.all(color: colorScheme.primary, width: 1.5),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(WiyaDesign.cornerRadius - 1.5),
+            child: ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: data.length,
+              padding: commonListViewBottomPadding,
+              itemBuilder: (context, index) {
+                final borderRadius = getItemBorderRadius(index, data.length);
+                return RepaintBoundary(
+                  key: listItemKey('home_recommended', index, data[index]),
+                  child: SongBar(
+                    data[index],
+                    true,
+                    backgroundColor: Colors.transparent,
+                    borderRadius: borderRadius,
+                  ),
+                );
+              },
+            ),
+          ),
         ),
       ],
     );
@@ -347,7 +405,7 @@ class _HomePageState extends State<HomePage> {
     final lowRes = song['lowResImage']?.toString();
     if (lowRes != null && lowRes.isNotEmpty) return lowRes;
     final artworkPath = song['artworkPath']?.toString();
-    if (artworkPath != null && artworkPath.isNotEmpty) return artworkPath;
+    if (ArtworkProvider.localFileExists(artworkPath)) return artworkPath;
     return null;
   }
 }

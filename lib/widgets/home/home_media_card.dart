@@ -161,25 +161,34 @@ class _Artwork extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = imageUrl;
     if (url == null || url.isEmpty) {
-      return NullArtworkWidget(
-        size: size,
-        borderRadius: WiyaDesign.cornerRadius,
-      );
-    }
-
-    try {
-      return Image(
-        image: ArtworkProvider.get(url),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => NullArtworkWidget(
+      return SizedBox.expand(
+        child: NullArtworkWidget(
           size: size,
           borderRadius: WiyaDesign.cornerRadius,
         ),
       );
+    }
+
+    try {
+      return SizedBox.expand(
+        child: Image(
+          image: ArtworkProvider.get(url),
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          alignment: Alignment.center,
+          errorBuilder: (_, __, ___) => NullArtworkWidget(
+            size: size,
+            borderRadius: WiyaDesign.cornerRadius,
+          ),
+        ),
+      );
     } catch (_) {
-      return NullArtworkWidget(
-        size: size,
-        borderRadius: WiyaDesign.cornerRadius,
+      return SizedBox.expand(
+        child: NullArtworkWidget(
+          size: size,
+          borderRadius: WiyaDesign.cornerRadius,
+        ),
       );
     }
   }

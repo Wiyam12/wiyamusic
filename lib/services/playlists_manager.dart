@@ -61,9 +61,76 @@ final onlinePlaylists = ValueNotifier<List<Map>>([]);
 bool isArtistPlaylist(dynamic playlist) =>
     PlaylistUtils.isArtistPlaylist(playlist);
 
-List<Map> getLikedPlaylistItems({bool includeArtists = false}) {
-  return userLikedPlaylists.value
-      .where((playlist) => includeArtists || !isArtistPlaylist(playlist))
+List<Map> getLikedPlaylistItems({
+  bool includeArtists = false,
+  bool offlineOnly = false,
+  bool excludeAlbums = false,
+}) {
+  final liked = userLikedPlaylists.value.where((playlist) {
+    if (!includeArtists && isArtistPlaylist(playlist)) return false;
+    if (excludeAlbums && playlist['isAlbum'] == true) return false;
+    return true;
+  });
+
+  if (!offlineOnly) return liked.toList();
+
+  final offline = <Map>[];
+  for (final playlist in liked) {
+    final offlinePlaylist = _findOfflinePlaylist(
+      playlist['ytid']?.toString() ?? '',
+    );
+    if (offlinePlaylist != null) {
+      offline.add(offlinePlaylist);
+    }
+  }
+  return offline;
+}
+
+List<Map> getLikedAlbumItems({bool offlineOnly = false}) {
+  final likedAlbums = userLikedPlaylists.value.where(
+    (playlist) =>
+        !isArtistPlaylist(playlist) && playlist['isAlbum'] == true,
+  );
+
+  if (!offlineOnly) {
+    return likedAlbums
+        .map((playlist) => Map<String, dynamic>.from(playlist))
+        .toList();
+  }
+
+  final offline = <Map>[];
+  for (final album in likedAlbums) {
+    final offlineAlbum = _findOfflinePlaylist(
+      album['ytid']?.toString() ?? '',
+    );
+    if (offlineAlbum != null) {
+      offline.add(offlineAlbum);
+    }
+  }
+  return offline;
+}
+
+/// All downloaded albums currently stored for offline playback.
+List<Map> getOfflineAlbumItems() {
+  return offlinePlaylistService.offlinePlaylists.value
+      .whereType<Map>()
+      .where(
+        (playlist) =>
+            playlist['isAlbum'] == true && !isArtistPlaylist(playlist),
+      )
+      .map((playlist) => Map<String, dynamic>.from(playlist))
+      .toList();
+}
+
+/// Downloaded playlists only (excludes albums and artists).
+List<Map> getOfflinePlaylistItems() {
+  return offlinePlaylistService.offlinePlaylists.value
+      .whereType<Map>()
+      .where(
+        (playlist) =>
+            playlist['isAlbum'] != true && !isArtistPlaylist(playlist),
+      )
+      .map((playlist) => Map<String, dynamic>.from(playlist))
       .toList();
 }
 
@@ -105,8 +172,31 @@ void reloadPlaylistLibraryStateFromStorage() {
 }
 
 void _updateOnlineCache(Map? p) {
-  if (p != null && !onlinePlaylists.value.any((x) => x['ytid'] == p['ytid'])) {
+  if (p == null) return;
+  final id = p['ytid']?.toString();
+  if (id == null || id.isEmpty) return;
+
+  final existingIndex = onlinePlaylists.value.indexWhere(
+    (x) => x['ytid']?.toString() == id,
+  );
+  if (existingIndex == -1) {
     onlinePlaylists.value = [...onlinePlaylists.value, p];
+    return;
+  }
+
+  final updated = List<Map>.from(onlinePlaylists.value);
+  final existing = updated[existingIndex];
+  final existingList = existing['list'];
+  final nextList = p['list'];
+  // Prefer the richer payload (non-empty song list wins).
+  if (nextList is List &&
+      nextList.isNotEmpty &&
+      (existingList is! List || existingList.isEmpty)) {
+    updated[existingIndex] = p;
+    onlinePlaylists.value = updated;
+  } else if (existingList is! List || existingList.isEmpty) {
+    updated[existingIndex] = {...existing, ...p};
+    onlinePlaylists.value = updated;
   }
 }
 
@@ -1033,6 +1123,7 @@ Future<Map?> getPlaylistInfoForWidget(
   String? sourceVideoAuthor,
   bool preferredVerified = false,
   bool forceRefresh = false,
+  bool localOnly = false,
 }) async {
   if (id == null) return null;
   final normalizedId = id.toString().trim();
@@ -1042,9 +1133,25 @@ Future<Map?> getPlaylistInfoForWidget(
     if (offlineArtist != null && (!forceRefresh || offlineMode.value)) {
       return offlineArtist;
     }
-    if (offlineMode.value) return null;
+    var localCachedArtist = await _loadPlaylistFromLocalCache(normalizedId);
+    var localList = localCachedArtist?['list'];
+    // Artist catalogs are cached separately from playlist songs, so also
+    // consult the artist-catalog cache before falling back to the network.
+    if (!forceRefresh && !(localList is List && localList.isNotEmpty)) {
+      final cachedCatalog = await getCachedArtistCatalog(normalizedId);
+      if (cachedCatalog != null) {
+        localCachedArtist = cachedCatalog;
+        localList = cachedCatalog['list'];
+      }
+    }
+    if (!forceRefresh && localList is List && localList.isNotEmpty) {
+      return localCachedArtist;
+    }
+    if (offlineMode.value || localOnly) {
+      return localCachedArtist ?? offlineArtist;
+    }
 
-    return getArtistCatalog(
+    final fetchedArtist = await getArtistCatalog(
       normalizedId,
       preferredName: artistName,
       preferredImage: artistImage,
@@ -1053,6 +1160,13 @@ Future<Map?> getPlaylistInfoForWidget(
       forceRefresh: forceRefresh,
       preferredVerified: preferredVerified,
     );
+    final fetchedList = fetchedArtist?['list'];
+    if (fetchedArtist == null ||
+        fetchedArtist['catalogStatus'] == 'failed' ||
+        (fetchedList is List && fetchedList.isEmpty)) {
+      return localCachedArtist ?? fetchedArtist;
+    }
+    return fetchedArtist;
   }
   if (normalizedId.startsWith('customId-')) {
     return _findCustomPlaylist(normalizedId)?.playlist;
@@ -1061,7 +1175,18 @@ Future<Map?> getPlaylistInfoForWidget(
   final offlinePlaylist = _findOfflinePlaylist(normalizedId);
   if (offlinePlaylist != null) return offlinePlaylist;
 
-  return _fetchYouTubePlaylist(normalizedId);
+  final localCached = await _loadPlaylistFromLocalCache(normalizedId);
+  if (localCached != null) {
+    final list = localCached['list'];
+    if (list is List && list.isNotEmpty) {
+      return localCached;
+    }
+  }
+
+  if (offlineMode.value || localOnly) return localCached;
+
+  final fetched = await _fetchYouTubePlaylist(normalizedId);
+  return fetched ?? localCached;
 }
 
 Future<Map<String, dynamic>?> resolveArtistInfoForWidget(
@@ -1080,7 +1205,18 @@ Future<Map<String, dynamic>?> resolveArtistInfoForWidget(
   if (offlineArtist != null) {
     return Map<String, dynamic>.from(offlineArtist);
   }
-  if (offlineMode.value) return null;
+  final localCachedArtist = await _loadPlaylistFromLocalCache(normalizedId);
+  if (localCachedArtist != null) {
+    final localList = localCachedArtist['list'];
+    if (localList is List && localList.isNotEmpty) {
+      return Map<String, dynamic>.from(localCachedArtist);
+    }
+  }
+  if (offlineMode.value) {
+    return localCachedArtist == null
+        ? null
+        : Map<String, dynamic>.from(localCachedArtist);
+  }
 
   final artist = await resolveArtist(
     normalizedId,
@@ -1096,7 +1232,9 @@ Future<Map<String, dynamic>?> resolveArtistInfoForWidget(
       'No official artist channel found for "$normalizedId"'
       '${artistName == null ? '' : ' ($artistName)'}',
     );
-    return null;
+    return localCachedArtist == null
+        ? null
+        : Map<String, dynamic>.from(localCachedArtist);
   }
 
   return {...artist, 'source': 'youtube-artist', 'isArtist': true, 'list': []};
@@ -1134,13 +1272,32 @@ Map? _findPlaylistById(Iterable<dynamic> playlists, String id) {
 }
 
 Future<Map?> _fetchYouTubePlaylist(String id) async {
-  // 1. Local DB / in-memory caches (no network).
+  // 1. Local DB / in-memory / liked+song caches (no network).
   var playlist = _findPlaylistById(playlists, id);
+  playlist ??= await _loadPlaylistFromLocalCache(id);
 
-  // 2. User-added YouTube playlists.
+  final localList = playlist?['list'];
+  if (playlist != null && localList is List && localList.isNotEmpty) {
+    return playlist;
+  }
+
+  // Stay local-only when offline — never kick off YouTube requests.
+  if (offlineMode.value) {
+    return playlist;
+  }
+
+  // 2. User-added YouTube playlists (may hit network).
   if (playlist == null) {
-    final userPlaylists = await getUserPlaylists();
-    playlist = _findPlaylistById(userPlaylists, id);
+    try {
+      final userPlaylists = await getUserPlaylists();
+      playlist = _findPlaylistById(userPlaylists, id);
+    } catch (e, stackTrace) {
+      logger.log(
+        'Failed loading user playlists while resolving $id',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   // 3. Previously fetched online playlists.
@@ -1171,7 +1328,15 @@ Future<Map?> _fetchYouTubePlaylist(String id) async {
   // 5. Populate the song list if it is absent or empty.
   final list = playlist['list'];
   if (list == null || (list is List && list.isEmpty)) {
-    playlist['list'] = await _loadSongsForPlaylist(playlist);
+    try {
+      playlist['list'] = await _loadSongsForPlaylist(playlist);
+    } catch (e, stackTrace) {
+      logger.log(
+        'Failed loading songs for playlist $id',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   return playlist;
@@ -1204,21 +1369,51 @@ Future<List> getSongsFromPlaylist(
   dynamic playlistId, {
   String? playlistImage,
 }) async {
-  final songList = await getData('cache', 'playlistSongs$playlistId') ?? [];
+  final songList =
+      await getData(
+        'cache',
+        'playlistSongs$playlistId',
+        cachingDuration: likedPlaylistCacheDuration,
+      ) ??
+      [];
 
-  if (songList.isEmpty) {
+  if (songList is List && songList.isNotEmpty) {
+    return List<dynamic>.from(songList);
+  }
+
+  if (offlineMode.value) {
+    return const [];
+  }
+
+  try {
+    final freshSongList = <dynamic>[];
     await for (final song in ytClient.playlists.getVideos(playlistId)) {
-      songList.add(
-        returnSongLayout(songList.length, song, playlistImage: playlistImage),
+      freshSongList.add(
+        returnSongLayout(
+          freshSongList.length,
+          song,
+          playlistImage: playlistImage,
+        ),
       );
     }
 
     unawaited(
-      addOrUpdateData<List>('cache', 'playlistSongs$playlistId', songList),
+      addOrUpdateData<List>(
+        'cache',
+        'playlistSongs$playlistId',
+        freshSongList,
+      ),
     );
-  }
 
-  return songList;
+    return freshSongList;
+  } catch (e, stackTrace) {
+    logger.log(
+      'Error fetching songs for playlist $playlistId',
+      error: e,
+      stackTrace: stackTrace,
+    );
+    return const [];
+  }
 }
 
 Future updatePlaylistList(BuildContext context, String playlistId) async {
@@ -1333,12 +1528,19 @@ Future<void> updatePlaylistLikeStatus(
     );
 
     if (add) {
-      if (playlistToAdd != null &&
-          !updatedLikedPlaylists.any(
-            (playlist) => playlist['ytid']?.toString() == normalizedPlaylistId,
-          )) {
-        updatedLikedPlaylists.add(playlistToAdd);
-        offlinePlaylistService.checkAndAutoMarkOffline(playlistToAdd);
+      if (playlistToAdd != null) {
+        // Persist songs + metadata to local cache so reopening works offline/
+        // without waiting on YouTube.
+        unawaited(_cachePlaylistForLocalAccess(playlistToAdd));
+
+        if (!updatedLikedPlaylists.any(
+          (playlist) => playlist['ytid']?.toString() == normalizedPlaylistId,
+        )) {
+          // Store metadata only in likedPlaylists — full song lists can fail
+          // Hive writes there; songs live in the cache box instead.
+          updatedLikedPlaylists.add(_likedPlaylistMetadata(playlistToAdd));
+          offlinePlaylistService.checkAndAutoMarkOffline(playlistToAdd);
+        }
       }
     } else {
       updatedLikedPlaylists.removeWhere(
@@ -1364,6 +1566,116 @@ Future<void> updatePlaylistLikeStatus(
       stackTrace: stackTrace,
     );
   }
+}
+
+/// Saves playlist metadata + song list for fast local-first loads.
+Future<void> _cachePlaylistForLocalAccess(Map playlist) async {
+  final playlistId = playlist['ytid']?.toString();
+  if (playlistId == null || playlistId.isEmpty) return;
+
+  try {
+    final metadata = _likedPlaylistMetadata(playlist);
+    final songs = _songsForHiveCache(playlist['list']);
+
+    // Keep an in-memory copy with songs for the current session.
+    _updateOnlineCache({
+      ...metadata,
+      if (songs.isNotEmpty) 'list': songs,
+    });
+
+    await addOrUpdateData<Map>('cache', 'playlistInfo$playlistId', metadata);
+
+    if (songs.isNotEmpty) {
+      await addOrUpdateData<List>(
+        'cache',
+        'playlistSongs$playlistId',
+        songs,
+      );
+    }
+  } catch (e, stackTrace) {
+    logger.log(
+      'Failed to cache liked playlist $playlistId',
+      error: e,
+      stackTrace: stackTrace,
+    );
+  }
+}
+
+List<Map<String, dynamic>> _songsForHiveCache(dynamic list) {
+  if (list is! List || list.isEmpty) return const [];
+
+  final songs = <Map<String, dynamic>>[];
+  for (final song in list) {
+    if (song is! Map) continue;
+    try {
+      songs.add(
+        Map<String, dynamic>.from(
+          song.map((key, value) => MapEntry(key.toString(), value)),
+        ),
+      );
+    } catch (_) {
+      // Skip entries Hive can't serialize.
+    }
+  }
+  return songs;
+}
+
+/// Rebuilds a playlist from local liked metadata + song cache when available.
+Future<Map?> _loadPlaylistFromLocalCache(String playlistId) async {
+  final likedMeta = _findPlaylistById(userLikedPlaylists.value, playlistId);
+  final cachedInfo = await getData(
+    'cache',
+    'playlistInfo$playlistId',
+    cachingDuration: likedPlaylistCacheDuration,
+  );
+  final online = _findPlaylistById(onlinePlaylists.value, playlistId);
+
+  Map<String, dynamic>? base;
+  if (online is Map) {
+    base = Map<String, dynamic>.from(
+      online.map((key, value) => MapEntry(key.toString(), value)),
+    );
+  } else if (cachedInfo is Map) {
+    base = Map<String, dynamic>.from(
+      cachedInfo.map((key, value) => MapEntry(key.toString(), value)),
+    );
+  } else if (likedMeta != null) {
+    base = Map<String, dynamic>.from(
+      likedMeta.map((key, value) => MapEntry(key.toString(), value)),
+    );
+  }
+
+  if (base == null) return null;
+  base['ytid'] = playlistId;
+
+  final existingList = base['list'];
+  if (existingList is List && existingList.isNotEmpty) {
+    return base;
+  }
+
+  final cachedSongs = await getData(
+    'cache',
+    'playlistSongs$playlistId',
+    cachingDuration: likedPlaylistCacheDuration,
+  );
+  if (cachedSongs is List && cachedSongs.isNotEmpty) {
+    base['list'] = List<dynamic>.from(cachedSongs);
+    return base;
+  }
+
+  // Metadata-only hit still useful for library rows / titles.
+  return base;
+}
+
+Map<String, dynamic> _likedPlaylistMetadata(Map playlist) {
+  return {
+    'ytid': playlist['ytid']?.toString(),
+    'title': playlist['title']?.toString() ?? 'Playlist',
+    if (playlist['image'] != null) 'image': playlist['image'],
+    if (playlist['source'] != null) 'source': playlist['source'],
+    if (playlist['isAlbum'] != null) 'isAlbum': playlist['isAlbum'],
+    if (playlist['isArtist'] != null) 'isArtist': playlist['isArtist'],
+  };
 }
 
 List<Map> _deduplicateLikedPlaylists(Iterable<Map> likedPlaylists) {
@@ -1401,17 +1713,55 @@ Future<Map?> _resolvePlaylistForLikedStatus(
   String playlistId,
   Map? playlistData,
 ) async {
-  if (playlistData?['ytid']?.toString() == playlistId) {
-    return Map<String, dynamic>.from(playlistData!);
+  Map<String, dynamic>? asStringKeyMap(Map? source) {
+    if (source == null) return null;
+    try {
+      return Map<String, dynamic>.from(
+        source.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final provided = asStringKeyMap(playlistData);
+  if (provided != null) {
+    provided['ytid'] = playlistId;
+    if ((provided['title']?.toString() ?? '').trim().isNotEmpty) {
+      return provided;
+    }
   }
 
   final cachedPlaylist = _searchAppPlaylistsById(playlistId);
   if (cachedPlaylist != null) {
-    return Map<String, dynamic>.from(cachedPlaylist);
+    final cached = asStringKeyMap(cachedPlaylist) ?? <String, dynamic>{};
+    cached['ytid'] = playlistId;
+    if ((cached['title']?.toString() ?? '').trim().isEmpty &&
+        provided != null) {
+      cached['title'] = provided['title'];
+      cached['image'] ??= provided['image'];
+    }
+    return cached;
   }
 
   final playlistInfo = await getPlaylistInfoForWidget(playlistId);
-  return playlistInfo == null ? null : Map<String, dynamic>.from(playlistInfo);
+  if (playlistInfo != null) {
+    final resolved = asStringKeyMap(playlistInfo) ?? <String, dynamic>{};
+    resolved['ytid'] = playlistId;
+    return resolved;
+  }
+
+  // Last resort so the library can still list a liked playlist.
+  if (provided != null) {
+    provided['title'] ??= 'Playlist';
+    return provided;
+  }
+
+  return {
+    'ytid': playlistId,
+    'title': 'Playlist',
+    'list': <dynamic>[],
+  };
 }
 
 bool isPlaylistPinned(String playlistId) =>

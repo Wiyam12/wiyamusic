@@ -19,6 +19,7 @@
  *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 
 class CustomBar extends StatelessWidget {
@@ -33,6 +34,7 @@ class CustomBar extends StatelessWidget {
     this.iconColor,
     this.textColor,
     this.borderRadius = BorderRadius.zero,
+    this.showDivider = false,
     super.key,
   });
 
@@ -46,11 +48,13 @@ class CustomBar extends StatelessWidget {
   final Color? iconColor;
   final Color? textColor;
   final BorderRadius borderRadius;
+  final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final effectiveIconColor = iconColor ?? colorScheme.onSecondaryContainer;
+    final effectiveIconColor = iconColor ?? colorScheme.onSurfaceVariant;
+    final effectiveTextColor = textColor ?? colorScheme.onSurface;
 
     return Material(
       color: backgroundColor ?? colorScheme.surfaceContainerLow,
@@ -59,50 +63,67 @@ class CustomBar extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(tileIcon, size: 26, color: effectiveIconColor),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showDivider)
+              Divider(
+                height: 1,
+                thickness: 1,
+                indent: 48,
+                color: colorScheme.outlineVariant.withValues(alpha: 0.45),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tileName,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                        color: textColor ?? colorScheme.onSurface,
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+              child: Row(
+                children: [
+                  Icon(tileIcon, size: 22, color: effectiveIconColor),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          tileName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: 15,
+                            color: effectiveTextColor,
+                          ),
+                        ),
+                        if (description != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            description!,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color:
+                                      textColor?.withValues(alpha: 0.7) ??
+                                      colorScheme.onSurfaceVariant,
+                                ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (trailing != null) ...[
+                    const SizedBox(width: 8),
+                    trailing!,
+                  ] else if (onTap != null) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      FluentIcons.chevron_right_24_regular,
+                      size: 18,
+                      color: colorScheme.onSurfaceVariant.withValues(
+                        alpha: 0.7,
                       ),
                     ),
-                    if (description != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        description!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color:
-                              textColor?.withValues(alpha: 0.75) ??
-                              colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
                   ],
-                ),
+                ],
               ),
-              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

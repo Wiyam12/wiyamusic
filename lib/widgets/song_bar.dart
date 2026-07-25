@@ -22,17 +22,20 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/artwork_provider.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/formatter.dart';
 import 'package:wiyamusic/utilities/playlist_dialogs.dart';
@@ -46,12 +49,12 @@ List<PopupMenuEntry<String>> _buildSongMenuItems({
   required ColorScheme colorScheme,
   required ValueListenable<bool> songLikeStatus,
   required ValueListenable<bool> songOfflineStatus,
+  required String ytid,
   required bool showQueueActions,
   bool isRecentSong = false,
   bool canRename = false,
   bool canRemove = false,
   bool showGoToArtist = false,
-  bool isDownloading = false,
 }) {
   final l10n = context.l10n!;
   final playNextText = l10n.playNext;
@@ -63,7 +66,9 @@ List<PopupMenuEntry<String>> _buildSongMenuItems({
   final removeFromRecentlyPlayedText = l10n.removeFromRecentlyPlayed;
   final removeOfflineText = l10n.removeOffline;
   final makeOfflineText = l10n.makeOffline;
+  final cancelText = l10n.cancel;
   final renameSongText = l10n.renameSong;
+  final downloadProgress = songDownloadProgressNotifier(ytid);
 
   return [
     if (showQueueActions)
@@ -137,27 +142,40 @@ List<PopupMenuEntry<String>> _buildSongMenuItems({
         label: removeFromRecentlyPlayedText,
         colorScheme: colorScheme,
       ),
-    if (!isDownloading && (!offlineMode.value || songOfflineStatus.value))
+    if (!offlineMode.value || songOfflineStatus.value)
       PopupMenuItem<String>(
         value: 'offline',
         child: ValueListenableBuilder<bool>(
           valueListenable: songOfflineStatus,
-          builder: (_, value, __) {
-            // Already offline: only allow removal (no re-download).
-            return Row(
-              children: [
-                Icon(
-                  value
-                      ? FluentIcons.cloud_dismiss_24_regular
-                      : FluentIcons.cloud_arrow_down_24_regular,
-                  color: colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  value ? removeOfflineText : makeOfflineText,
-                  style: TextStyle(color: colorScheme.onSurface),
-                ),
-              ],
+          builder: (_, isOffline, __) {
+            return ValueListenableBuilder<double?>(
+              valueListenable: downloadProgress,
+              builder: (_, progress, __) {
+                final isDownloading = progress != null;
+                final IconData icon;
+                final String label;
+                if (isOffline) {
+                  icon = FluentIcons.cloud_dismiss_24_regular;
+                  label = removeOfflineText;
+                } else if (isDownloading) {
+                  icon = FluentIcons.dismiss_24_regular;
+                  label = cancelText;
+                } else {
+                  icon = FluentIcons.cloud_arrow_down_24_regular;
+                  label = makeOfflineText;
+                }
+
+                return Row(
+                  children: [
+                    Icon(icon, color: colorScheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      style: TextStyle(color: colorScheme.onSurface),
+                    ),
+                  ],
+                );
+              },
             );
           },
         ),
@@ -273,10 +291,11 @@ Future<void> _toggleSongOfflineStatus(
     return;
   }
 
-  // Prevent duplicate downloads — one tap starts at most one request.
+  // In-progress download → cancel instead of hiding/blocking the action.
   if (isSongDownloading(ytid)) {
+    cancelSongDownload(ytid);
     if (context.mounted) {
-      showToast(context, context.l10n!.alreadyDownloading);
+      showToast(context, context.l10n!.downloadCancelled);
     }
     return;
   }
@@ -294,6 +313,8 @@ Future<void> _toggleSongOfflineStatus(
         showToast(context, context.l10n!.error);
       }
     }
+  } on SongOfflineDownloadCancelled {
+    songOfflineStatus.value = false;
   } on SongOfflineRateLimited {
     songOfflineStatus.value = false;
     if (context.mounted) {
@@ -328,6 +349,7 @@ class SongBar extends StatefulWidget {
     this.onRenamed,
     this.rank,
     this.barPadding,
+    this.showPlayingIndicator = false,
     super.key,
   });
 
@@ -346,6 +368,7 @@ class SongBar extends StatefulWidget {
   final VoidCallback? onRenamed;
   final EdgeInsetsGeometry? barPadding;
   final int? rank;
+  final bool showPlayingIndicator;
   @override
   State<SongBar> createState() => _SongBarState();
 }
@@ -476,8 +499,10 @@ class _SongBarState extends State<SongBar> {
               ),
 
               _SongOfflineTrailing(
+                song: widget.song,
                 ytid: _ytid,
                 offlineStatus: _songOfflineStatus,
+                showPlayingIndicator: widget.showPlayingIndicator,
                 menuButton: OverflowMenuButton<String>(
                   onSelected: (value) => _handleSongMenuAction(
                     context: context,
@@ -501,8 +526,9 @@ class _SongBarState extends State<SongBar> {
   }
 
   void _handleSongTap() {
-    if (audioHandler.isPlayRequestPending.value) return;
-
+    // Always forward the tap. The audio handler supersedes any in-flight
+    // stream load via transition IDs — blocking here left users stuck on a
+    // slow/failed song when tapping another track.
     if (widget.onPlay != null) {
       widget.onPlay!();
       return;
@@ -599,31 +625,36 @@ class _SongBarState extends State<SongBar> {
       colorScheme: colorScheme,
       songLikeStatus: _songLikeStatus,
       songOfflineStatus: _songOfflineStatus,
+      ytid: _ytid,
       showQueueActions: widget.showQueueActions,
       isRecentSong: widget.isRecentSong == true,
       canRename: canRename,
       canRemove: widget.onRemove != null,
       showGoToArtist: _songArtist.isNotEmpty,
-      isDownloading: isSongDownloading(_ytid),
     );
   }
 }
 
 class _SongOfflineTrailing extends StatelessWidget {
   const _SongOfflineTrailing({
+    required this.song,
     required this.ytid,
     required this.offlineStatus,
+    required this.showPlayingIndicator,
     required this.menuButton,
   });
 
+  final dynamic song;
   final String ytid;
-  final ValueListenable<bool> offlineStatus;
+  final ValueNotifier<bool> offlineStatus;
+  final bool showPlayingIndicator;
   final Widget menuButton;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final progressListenable = songDownloadProgressNotifier(ytid);
+    final l10n = context.l10n!;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -635,34 +666,65 @@ class _SongOfflineTrailing extends StatelessWidget {
               valueListenable: progressListenable,
               builder: (context, progress, _) {
                 final isDownloading = progress != null;
+                // Hide the standalone cloud icon; only surface the control
+                // while a download is in progress (to allow cancelling) or
+                // when the song is already offline (to allow removal).
                 if (!isOffline && !isDownloading) {
                   return const SizedBox.shrink();
                 }
 
+                final String tooltip;
+                final IconData icon;
+                if (isOffline) {
+                  tooltip = l10n.removeOffline;
+                  icon = FluentIcons.cloud_dismiss_24_regular;
+                } else if (isDownloading) {
+                  tooltip = l10n.cancel;
+                  icon = FluentIcons.dismiss_24_regular;
+                } else {
+                  tooltip = l10n.makeOffline;
+                  icon = FluentIcons.cloud_arrow_down_24_regular;
+                }
+
                 return Padding(
                   padding: const EdgeInsets.only(right: 2),
-                  child: SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        if (isDownloading)
-                          CircularProgressIndicator(
-                            value: progress.clamp(0.0, 1.0),
-                            strokeWidth: 2.4,
-                            backgroundColor: colorScheme.onSurfaceVariant
-                                .withValues(alpha: 0.2),
-                            color: colorScheme.primary,
+                  child: IconButton(
+                    tooltip: tooltip,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 34,
+                      minHeight: 34,
+                    ),
+                    onPressed: () => _toggleSongOfflineStatus(
+                      context,
+                      song,
+                      ytid,
+                      offlineStatus,
+                    ),
+                    icon: SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          if (isDownloading)
+                            CircularProgressIndicator(
+                              value: progress.clamp(0.0, 1.0),
+                              strokeWidth: 2.4,
+                              backgroundColor: colorScheme.onSurfaceVariant
+                                  .withValues(alpha: 0.2),
+                              color: colorScheme.primary,
+                            ),
+                          Icon(
+                            icon,
+                            size: 15,
+                            color: isDownloading || isOffline
+                                ? colorScheme.primary
+                                : colorScheme.onSurfaceVariant,
                           ),
-                        Icon(
-                          FluentIcons.cloud_off_24_regular,
-                          size: 15,
-                          color: isDownloading
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -670,6 +732,32 @@ class _SongOfflineTrailing extends StatelessWidget {
             );
           },
         ),
+        if (showPlayingIndicator)
+          StreamBuilder<MediaItem?>(
+            stream: audioHandler.mediaItem,
+            builder: (context, mediaSnapshot) {
+              final activeYtid = mediaSnapshot.data?.extras?['ytid']
+                  ?.toString();
+              if (activeYtid != ytid) return const SizedBox.shrink();
+
+              return StreamBuilder<PlaybackState>(
+                stream: audioHandler.playbackState,
+                builder: (context, playbackSnapshot) {
+                  if (playbackSnapshot.data?.playing != true) {
+                    return const SizedBox.shrink();
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: LoadingAnimationWidget.staggeredDotsWave(
+                      color: colorScheme.primary,
+                      size: 22,
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         menuButton,
       ],
     );
@@ -753,16 +841,20 @@ class _SongInfo extends StatelessWidget {
 class _OfflineArtwork extends StatelessWidget {
   const _OfflineArtwork({
     required this.artworkPath,
+    required this.lowResImageUrl,
     required this.size,
     required this.colorScheme,
   });
 
   final String artworkPath;
+  final String lowResImageUrl;
   final double size;
   final ColorScheme colorScheme;
 
   @override
   Widget build(BuildContext context) {
+    final hasLocalFile = ArtworkProvider.localFileExists(artworkPath);
+
     return SizedBox(
       width: size,
       height: size,
@@ -770,14 +862,26 @@ class _OfflineArtwork extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         child: Stack(
           children: [
-            Image.file(
-              File(artworkPath),
-              width: size,
-              height: size,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
-                  const NullArtworkWidget(iconSize: 30),
-            ),
+            if (hasLocalFile)
+              Image.file(
+                File(artworkPath),
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    const NullArtworkWidget(iconSize: 30),
+              )
+            else if (lowResImageUrl.isNotEmpty)
+              Image(
+                image: ArtworkProvider.get(lowResImageUrl),
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    const NullArtworkWidget(iconSize: 30),
+              )
+            else
+              const NullArtworkWidget(iconSize: 30),
             Positioned(
               top: 3,
               right: 3,
@@ -950,6 +1054,7 @@ class _ArtworkDisplay extends StatelessWidget {
         if (isOffline && artworkPath != null) {
           return _OfflineArtwork(
             artworkPath: artworkPath!,
+            lowResImageUrl: lowResImageUrl,
             size: size,
             colorScheme: colorScheme,
           );

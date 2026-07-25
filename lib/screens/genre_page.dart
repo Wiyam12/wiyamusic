@@ -146,6 +146,7 @@ class _GenrePageState extends State<GenrePage> {
               SliverToBoxAdapter(
                 child: Skeletonizer(
                   child: _GenreSections(
+                    genre: _genre,
                     sections: List.generate(
                       3,
                       (i) => GenreDetailSection(
@@ -177,7 +178,10 @@ class _GenrePageState extends State<GenrePage> {
               )
             else
               SliverToBoxAdapter(
-                child: _GenreSections(sections: _snapshot.sections),
+                child: _GenreSections(
+                  genre: _genre,
+                  sections: _snapshot.sections,
+                ),
               ),
             const SliverToBoxAdapter(child: MiniPlayerBottomSpace()),
           ],
@@ -238,8 +242,9 @@ class _GenreHeaderBackground extends StatelessWidget {
 }
 
 class _GenreSections extends StatelessWidget {
-  const _GenreSections({required this.sections});
+  const _GenreSections({required this.genre, required this.sections});
 
+  final String genre;
   final List<GenreDetailSection> sections;
 
   @override
@@ -268,7 +273,10 @@ class _GenreSections extends StatelessWidget {
               itemCount: section.items.length,
               separatorBuilder: (_, __) => const SizedBox(width: 14),
               itemBuilder: (context, index) {
-                return _GenreMediaCard(item: section.items[index]);
+                return _GenreMediaCard(
+                  genre: genre,
+                  item: section.items[index],
+                );
               },
             ),
           ),
@@ -280,8 +288,9 @@ class _GenreSections extends StatelessWidget {
 }
 
 class _GenreMediaCard extends StatelessWidget {
-  const _GenreMediaCard({required this.item});
+  const _GenreMediaCard({required this.genre, required this.item});
 
+  final String genre;
   final GenreDetailItem item;
 
   @override
@@ -296,7 +305,16 @@ class _GenreMediaCard extends StatelessWidget {
           borderRadius: WiyaDesign.borderRadiusMedium,
           onTap: () {
             if (item.ytid.isEmpty) return;
-            context.push('/home/playlist/${item.ytid}');
+            context.push(
+              '/home/playlist/${item.ytid}',
+              extra: {
+                'ytid': item.ytid,
+                'title': item.title,
+                'image': item.image,
+                'isAlbum': item.isAlbum,
+                'genre': genre,
+              },
+            );
           },
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

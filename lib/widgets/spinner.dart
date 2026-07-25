@@ -20,17 +20,19 @@
  */
 
 import 'package:flutter/material.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
 
 class Spinner extends StatelessWidget {
-  const Spinner({super.key});
+  const Spinner({super.key, this.size = 48});
+
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: CircularProgressIndicator(
-        valueColor: AlwaysStoppedAnimation<Color>(
-          Theme.of(context).colorScheme.primary,
-        ),
+      child: LoadingAnimationWidget.inkDrop(
+        color: Theme.of(context).colorScheme.primary,
+        size: size,
       ),
     );
   }
