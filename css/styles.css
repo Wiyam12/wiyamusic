@@ -886,6 +886,10 @@ a.nav-download-item:focus-visible {
   margin-bottom: 2rem;
 }
 
+.footer-downloads {
+  grid-column: 3;
+}
+
 .footer-copy,
 .site-footer p,
 .site-footer li {
@@ -929,6 +933,10 @@ a.nav-download-item:focus-visible {
   .highlight-grid,
   .feature-grid {
     grid-template-columns: 1fr;
+  }
+
+  .footer-downloads {
+    grid-column: auto;
   }
 
   .hero-visual {
