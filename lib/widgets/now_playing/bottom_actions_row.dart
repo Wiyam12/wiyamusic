@@ -242,10 +242,15 @@ Future<void> _toggleOffline(
     if (originalValue) {
       success = await removeSongFromOffline(audioId);
     } else {
-      success = await makeSongOffline(
-        mediaItemToMap(metadata),
-        cancelExisting: false,
-      );
+      final songMap = mediaItemToMap(metadata);
+      // Prefer live player duration when MediaItem duration is missing.
+      final playerDuration = audioHandler.audioPlayer.duration;
+      if (songMap['duration'] == null &&
+          playerDuration != null &&
+          playerDuration > Duration.zero) {
+        songMap['duration'] = playerDuration.inSeconds;
+      }
+      success = await makeSongOffline(songMap, cancelExisting: false);
     }
     if (!success) {
       logger.log('Offline toggle failed for $audioId');

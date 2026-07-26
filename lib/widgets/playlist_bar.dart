@@ -91,6 +91,23 @@ class PlaylistBar extends StatelessWidget {
 
   bool get _canAddToPlaylist => !isFolder && _resolvedPlaylistId != null;
 
+  /// Label for the like action, matching the kind of item this bar represents.
+  String _likeActionLabel(BuildContext context, {required bool isLiked}) {
+    if (isArtist) {
+      return isLiked
+          ? context.l10n!.removeFromLikedArtists
+          : context.l10n!.addToLikedArtists;
+    }
+    if (isAlbum == true || playlistData?['isAlbum'] == true) {
+      return isLiked
+          ? context.l10n!.removeFromLikedAlbums
+          : context.l10n!.addToLikedAlbums;
+    }
+    return isLiked
+        ? context.l10n!.removeFromLikedPlaylists
+        : context.l10n!.addToLikedPlaylists;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -264,9 +281,7 @@ class PlaylistBar extends StatelessWidget {
                         buildPopupMenuItem<String>(
                           value: 'like',
                           icon: likeStatusToIconMapper[isLiked]!,
-                          label: isLiked
-                              ? context.l10n!.removeFromLikedPlaylists
-                              : context.l10n!.addToLikedPlaylists,
+                          label: _likeActionLabel(context, isLiked: isLiked),
                           colorScheme: colorScheme,
                         ),
                       if (_canAddToPlaylist)
@@ -332,8 +347,7 @@ class PlaylistBar extends StatelessWidget {
   }
 
   Widget _buildPlaylistIcon(ColorScheme colorScheme) {
-    final rawArtwork =
-        playlistArtwork ?? playlistData?['image']?.toString();
+    final rawArtwork = playlistArtwork ?? playlistData?['image']?.toString();
     final artwork = isArtist
         ? normalizeArtistThumbnailUrl(rawArtwork)
         : rawArtwork;
@@ -591,10 +605,7 @@ class PlaylistBar extends StatelessWidget {
       }
 
       final basePath = _routeBasePath(context);
-      context.push(
-        '$basePath/playlist/$_resolvedPlaylistId',
-        extra: extra,
-      );
+      context.push('$basePath/playlist/$_resolvedPlaylistId', extra: extra);
     };
   }
 

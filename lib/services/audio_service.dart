@@ -141,8 +141,17 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         audioPlayer.positionStream,
         audioPlayer.bufferedPositionStream,
         audioPlayer.durationStream,
-        (position, bufferedPosition, duration) =>
-            PositionData(position, bufferedPosition, duration ?? Duration.zero),
+        (position, bufferedPosition, duration) {
+          final reported = duration ?? Duration.zero;
+          final known =
+              parseSongDuration(currentSong?['duration']) ??
+              mediaItem.valueOrNull?.duration;
+          return PositionData(
+            position,
+            bufferedPosition,
+            resolveReportedDuration(known, reported),
+          );
+        },
       ).distinct((prev, curr) {
         return (prev.position - curr.position).abs() < _positionDataThreshold &&
             prev.duration == curr.duration &&
@@ -314,6 +323,18 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       if (queueIndex < 0 || queueIndex >= _queueList.length) return;
 
       final currentSong = _queueList[queueIndex];
+      final knownDuration =
+          parseSongDuration(currentSong['duration']) ??
+          mediaItem.valueOrNull?.duration;
+      final resolvedDuration = resolveReportedDuration(knownDuration, duration);
+
+      // Persist the trusted length back onto the queue song so later offline
+      // / rebuild paths don't depend on inflated file metadata.
+      if (resolvedDuration > Duration.zero &&
+          parseSongDuration(currentSong['duration']) == null) {
+        currentSong['duration'] = resolvedDuration.inSeconds;
+      }
+
       final currentMediaItem = _getMediaItemForQueue(currentSong);
       final currentSongYtid = currentSong['ytid']?.toString();
       final currentItem = mediaItem.valueOrNull;
@@ -325,23 +346,25 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 
       if (currentItem != null &&
           isMatchingCurrentItem &&
-          _shouldUpdateDuration(currentItem.duration, duration)) {
-        mediaItem.add(currentItem.copyWith(duration: duration));
+          _shouldUpdateDuration(currentItem.duration, resolvedDuration)) {
+        mediaItem.add(currentItem.copyWith(duration: resolvedDuration));
       } else if (!isMatchingCurrentItem) {
-        mediaItem.add(currentMediaItem.copyWith(duration: duration));
+        mediaItem.add(currentMediaItem.copyWith(duration: resolvedDuration));
       }
 
       listeningStatsService.updateListeningSessionDuration(
         currentSongYtid,
-        duration,
+        resolvedDuration,
       );
 
       final existingQueue = queue.valueOrNull;
       if (existingQueue != null && queueIndex < existingQueue.length) {
         final queueItem = existingQueue[queueIndex];
-        if (_shouldUpdateDuration(queueItem.duration, duration)) {
+        if (_shouldUpdateDuration(queueItem.duration, resolvedDuration)) {
           final updatedQueue = List<MediaItem>.from(existingQueue);
-          updatedQueue[queueIndex] = queueItem.copyWith(duration: duration);
+          updatedQueue[queueIndex] = queueItem.copyWith(
+            duration: resolvedDuration,
+          );
           queue.add(updatedQueue);
         }
         return;
@@ -350,7 +373,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       final rebuiltQueue = _buildQueueMediaItems();
       if (queueIndex < rebuiltQueue.length) {
         rebuiltQueue[queueIndex] = rebuiltQueue[queueIndex].copyWith(
-          duration: duration,
+          duration: resolvedDuration,
         );
       }
       queue.add(rebuiltQueue);

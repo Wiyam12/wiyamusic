@@ -98,9 +98,7 @@ ColorScheme getAppColorScheme(
     );
   }
 
-  return ColorScheme.fromSeed(
-    seedColor: primaryColorSetting,
-  ).harmonized();
+  return ColorScheme.fromSeed(seedColor: primaryColorSetting).harmonized();
 }
 
 ThemeData getAppTheme(ColorScheme colorScheme) {
@@ -189,10 +187,7 @@ ThemeData getAppTheme(ColorScheme colorScheme) {
       iconColor: effectiveColorScheme.primary,
       shape: RoundedRectangleBorder(borderRadius: radiusMedium),
     ),
-    iconTheme: IconThemeData(
-      color: effectiveColorScheme.primary,
-      size: 24,
-    ),
+    iconTheme: IconThemeData(color: effectiveColorScheme.primary, size: 24),
     floatingActionButtonTheme: base.floatingActionButtonTheme.copyWith(
       backgroundColor: effectiveColorScheme.primary,
       foregroundColor: effectiveColorScheme.onPrimary,
@@ -280,7 +275,9 @@ ThemeData getAppTheme(ColorScheme colorScheme) {
       enabledBorder: OutlineInputBorder(
         borderRadius: radius,
         borderSide: BorderSide(
-          color: WiyaDesign.primaryBright.withValues(alpha: isLight ? 0.08 : 0.18),
+          color: WiyaDesign.primaryBright.withValues(
+            alpha: isLight ? 0.08 : 0.18,
+          ),
         ),
       ),
       focusedBorder: OutlineInputBorder(
@@ -309,10 +306,7 @@ ThemeData getAppTheme(ColorScheme colorScheme) {
       indicatorColor: effectiveColorScheme.primary.withValues(alpha: 0.22),
       iconTheme: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {
-          return IconThemeData(
-            color: effectiveColorScheme.primary,
-            size: 24,
-          );
+          return IconThemeData(color: effectiveColorScheme.primary, size: 24);
         }
         return IconThemeData(
           color: effectiveColorScheme.onSurfaceVariant,

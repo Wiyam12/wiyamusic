@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/models/position_data.dart';
 import 'package:wiyamusic/utilities/formatter.dart';
+import 'package:wiyamusic/utilities/mediaitem.dart';
 
 PositionData _positionData = PositionData(
   Duration.zero,
@@ -52,8 +53,16 @@ class _PositionSliderState extends State<PositionSlider> {
           _positionData = snapshot.data!;
         }
 
-        final maxDuration = _positionData.duration.inSeconds > 0
-            ? _positionData.duration.inSeconds.toDouble()
+        // Guard against inflated offline-file metadata if the stream briefly
+        // emits the raw player duration before correction.
+        final known = audioHandler.mediaItem.valueOrNull?.duration;
+        final safeDuration = resolveReportedDuration(
+          known,
+          _positionData.duration,
+        );
+
+        final maxDuration = safeDuration.inSeconds > 0
+            ? safeDuration.inSeconds.toDouble()
             : 1.0;
 
         final currentValue = _isDragging
@@ -92,19 +101,19 @@ class _PositionSliderState extends State<PositionSlider> {
                     formatDuration(value.toInt()),
               ),
             ),
-            _buildPositionRow(context, _positionData),
+            _buildPositionRow(context, safeDuration),
           ],
         );
       },
     );
   }
 
-  Widget _buildPositionRow(BuildContext context, PositionData positionData) {
+  Widget _buildPositionRow(BuildContext context, Duration duration) {
     final colorScheme = Theme.of(context).colorScheme;
     final positionText = formatDuration(
-      _isDragging ? _dragValue.toInt() : positionData.position.inSeconds,
+      _isDragging ? _dragValue.toInt() : _positionData.position.inSeconds,
     );
-    final durationText = formatDuration(positionData.duration.inSeconds);
+    final durationText = formatDuration(duration.inSeconds);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),

@@ -459,22 +459,21 @@ bool removeSongFromPlaylist(
       if (playlistSongs.length == initialLength) return false;
     }
 
+    // Keep the in-page copy in sync for immediate UI updates.
     playlist['list'] = playlistSongs;
 
     try {
       if (playlist['source'] == 'user-created') {
         final playlistId = playlist['ytid']?.toString();
-        final isInFolder =
-            playlistId != null &&
-            userPlaylistFolders.value.any((folder) {
-              final folderPlaylists =
-                  folder['playlists'] as List<dynamic>? ?? [];
-              return folderPlaylists.any(
-                (p) => p['ytid']?.toString() == playlistId,
-              );
-            });
+        if (playlistId == null || playlistId.isEmpty) return false;
 
-        if (isInFolder) {
+        // Route extras are shallow copies — always mutate the canonical
+        // playlist in storage, not only the page-local map.
+        final found = _findCustomPlaylist(playlistId);
+        final storedPlaylist = found?.playlist ?? playlist;
+        storedPlaylist['list'] = playlistSongs;
+
+        if (found?.isFromFolder == true) {
           userPlaylistFolders.value = List<Map>.from(userPlaylistFolders.value);
           unawaited(
             addOrUpdateData<List>(
@@ -484,12 +483,20 @@ bool removeSongFromPlaylist(
             ),
           );
         } else {
+          // Ensure the notifier list holds the updated map even if the page
+          // was opened from a detached copy.
+          final updated = List<Map>.from(userCustomPlaylists.value);
+          final index = updated.indexWhere(
+            (p) => p['ytid']?.toString() == playlistId,
+          );
+          if (index != -1) {
+            updated[index] = storedPlaylist;
+          } else if (found == null) {
+            updated.add(storedPlaylist);
+          }
+          userCustomPlaylists.value = updated;
           unawaited(
-            addOrUpdateData<List>(
-              'user',
-              'customPlaylists',
-              userCustomPlaylists.value,
-            ),
+            addOrUpdateData<List>('user', 'customPlaylists', updated),
           );
         }
       } else {
@@ -1241,16 +1248,19 @@ Future<Map<String, dynamic>?> resolveArtistInfoForWidget(
 }
 
 ({Map playlist, bool isFromFolder})? _findCustomPlaylist(String playlistId) {
+  final normalizedId = playlistId.trim();
+  if (normalizedId.isEmpty) return null;
+
   for (final playlist in userCustomPlaylists.value) {
-    if (playlist['ytid'] == playlistId) {
+    if (playlist['ytid']?.toString() == normalizedId) {
       return (playlist: playlist, isFromFolder: false);
     }
   }
   for (final folder in userPlaylistFolders.value) {
     final folderPlaylists = folder['playlists'] as List<dynamic>? ?? [];
     for (final playlist in folderPlaylists) {
-      if (playlist['ytid'] == playlistId) {
-        return (playlist: playlist as Map, isFromFolder: true);
+      if (playlist is Map && playlist['ytid']?.toString() == normalizedId) {
+        return (playlist: playlist, isFromFolder: true);
       }
     }
   }

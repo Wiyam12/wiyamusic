@@ -21,6 +21,7 @@
 
 import 'dart:async';
 
+import 'package:animated_icon/animated_icon.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -36,6 +37,7 @@ import 'package:wiyamusic/utilities/flutter_bottom_sheet.dart'
     show closeCurrentBottomSheet;
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/widgets/mini_player.dart';
+import 'package:wiyamusic/widgets/wiya_animated_icon.dart';
 
 class BottomNavigationPage extends StatefulWidget {
   const BottomNavigationPage({required this.child, super.key});
@@ -108,6 +110,7 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
           return LayoutBuilder(
             builder: (context, constraints) {
               final isLargeScreen = MediaQuery.sizeOf(context).width >= 600;
+              final colorScheme = Theme.of(context).colorScheme;
               final items = _getNavigationItems(isOfflineMode);
 
               return Scaffold(
@@ -124,8 +127,17 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                           destinations: items
                               .map(
                                 (item) => NavigationRailDestination(
-                                  icon: Icon(item.icon),
-                                  selectedIcon: Icon(item.selectedIcon),
+                                  icon: WiyaAnimatedIcon(
+                                    icon: item.animatedIcon,
+                                    size: 26,
+                                    color: colorScheme.onSurfaceVariant,
+                                    iconType: IconType.onlyIcon,
+                                  ),
+                                  selectedIcon: WiyaAnimatedIcon(
+                                    icon: item.animatedIcon,
+                                    size: 28,
+                                    color: colorScheme.primary,
+                                  ),
                                   label: Text(item.label),
                                 ),
                               )
@@ -239,7 +251,22 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
       currentIndex: _getCurrentIndex(items, isOfflineMode),
       onTap: (index) => _onTabTapped(index, items),
       items: items
-          .map((item) => SimpleNavBarItem(label: item.label, icon: item.icon))
+          .map(
+            (item) => SimpleNavBarItem(
+              label: item.label,
+              customWidget: WiyaAnimatedIcon(
+                icon: item.animatedIcon,
+                size: 24,
+                color: colorScheme.onSurfaceVariant,
+                iconType: IconType.onlyIcon,
+              ),
+              activeCustomWidget: WiyaAnimatedIcon(
+                icon: item.animatedIcon,
+                size: 26,
+                color: colorScheme.primary,
+              ),
+            ),
+          )
           .toList(),
       backgroundColor: colorScheme.surfaceContainerHigh.withValues(alpha: 0.82),
       selectedColor: colorScheme.primary,
@@ -260,8 +287,7 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
   List<_NavigationItem> _getNavigationItems(bool isOfflineMode) {
     final items = <_NavigationItem>[
       _NavigationItem(
-        icon: FluentIcons.home_24_regular,
-        selectedIcon: FluentIcons.home_24_filled,
+        animatedIcon: AnimateIcons.home,
         label: context.l10n?.home ?? 'Home',
         route: '/home',
         shellIndex: 0,
@@ -272,8 +298,7 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
     if (!isOfflineMode) {
       items.add(
         _NavigationItem(
-          icon: FluentIcons.search_24_regular,
-          selectedIcon: FluentIcons.search_24_filled,
+          animatedIcon: AnimateIcons.zoom,
           label: context.l10n?.search ?? 'Search',
           route: '/search',
           shellIndex: 1,
@@ -283,15 +308,13 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
 
     items.addAll([
       _NavigationItem(
-        icon: FluentIcons.book_24_regular,
-        selectedIcon: FluentIcons.book_24_filled,
+        animatedIcon: AnimateIcons.list,
         label: context.l10n?.library ?? 'Library',
         route: '/library',
         shellIndex: 2,
       ),
       _NavigationItem(
-        icon: FluentIcons.settings_24_regular,
-        selectedIcon: FluentIcons.settings_24_filled,
+        animatedIcon: AnimateIcons.settings,
         label: context.l10n?.settings ?? 'Settings',
         route: '/settings',
         shellIndex: 3,
@@ -355,15 +378,13 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
 
 class _NavigationItem {
   const _NavigationItem({
-    required this.icon,
-    required this.selectedIcon,
+    required this.animatedIcon,
     required this.label,
     required this.route,
     required this.shellIndex,
   });
 
-  final IconData icon;
-  final IconData selectedIcon;
+  final AnimateIcons animatedIcon;
   final String label;
   final String route;
   final int shellIndex;

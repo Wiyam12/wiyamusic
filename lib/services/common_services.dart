@@ -1276,6 +1276,14 @@ Future<bool> makeSongOffline(
     offlineSong['audioPath'] = audioFile.path;
     offlineSong['dateAdded'] = DateTime.now().millisecondsSinceEpoch;
 
+    // Normalize duration to integer seconds for MediaItem mapping.
+    final durationValue = offlineSong['duration'];
+    if (durationValue is Duration) {
+      offlineSong['duration'] = durationValue.inSeconds;
+    } else if (durationValue is num) {
+      offlineSong['duration'] = durationValue.round();
+    }
+
     try {
       final existingIndex = userOfflineSongs.value.indexWhere(
         (s) => s['ytid'] == ytid,

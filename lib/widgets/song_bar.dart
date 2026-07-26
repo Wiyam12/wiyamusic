@@ -22,13 +22,13 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:animated_icon/animated_icon.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/services/common_services.dart';
@@ -43,6 +43,7 @@ import 'package:wiyamusic/widgets/no_artwork_cube.dart';
 import 'package:wiyamusic/widgets/overflow_menu_button.dart';
 import 'package:wiyamusic/widgets/popup_menu_item.dart';
 import 'package:wiyamusic/widgets/rename_song_dialog.dart';
+import 'package:wiyamusic/widgets/wiya_animated_icon.dart';
 
 List<PopupMenuEntry<String>> _buildSongMenuItems({
   required BuildContext context,
@@ -169,10 +170,7 @@ List<PopupMenuEntry<String>> _buildSongMenuItems({
                   children: [
                     Icon(icon, color: colorScheme.primary),
                     const SizedBox(width: 8),
-                    Text(
-                      label,
-                      style: TextStyle(color: colorScheme.onSurface),
-                    ),
+                    Text(label, style: TextStyle(color: colorScheme.onSurface)),
                   ],
                 );
               },
@@ -747,10 +745,10 @@ class _SongOfflineTrailing extends StatelessWidget {
                     return const SizedBox.shrink();
                   }
 
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: LoadingAnimationWidget.staggeredDotsWave(
-                      color: colorScheme.primary,
+                  return const Padding(
+                    padding: EdgeInsets.only(right: 4),
+                    child: WiyaAnimatedIcon(
+                      icon: AnimateIcons.activity,
                       size: 22,
                     ),
                   );

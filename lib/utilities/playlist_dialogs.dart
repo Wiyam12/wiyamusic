@@ -21,21 +21,27 @@
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:wiyamusic/constants/app_constants.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
+import 'package:wiyamusic/utilities/artwork_provider.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/playlist_image_picker.dart';
-import 'package:wiyamusic/widgets/dialog_item.dart';
 
+/// Shows the create-playlist sheet.
+///
+/// [customOnly] hides the YouTube import mode, for flows that can only produce
+/// a user-created playlist.
 Future<Map<String, String>?> showCreatePlaylistDialog(
   BuildContext context, {
   dynamic songToAdd,
   List<dynamic>? songsToAdd,
+  bool customOnly = false,
 }) {
+  final canImportFromYouTube =
+      !customOnly && songToAdd == null && songsToAdd == null;
   var id = '';
   var customPlaylistName = '';
-  var isYouTubeMode = songToAdd == null && songsToAdd == null;
+  var isYouTubeMode = canImportFromYouTube;
   String? imageUrl;
   String? imageBase64;
 
@@ -106,15 +112,9 @@ Future<Map<String, String>?> showCreatePlaylistDialog(
                 if (context.mounted) showToast(context, result);
               }
               if (!context.mounted) return;
-              Navigator.pop(context, {
-                'type': 'custom',
-                'id': newPlaylistId,
-              });
+              Navigator.pop(context, {'type': 'custom', 'id': newPlaylistId});
             } else {
-              showToast(
-                context,
-                '${context.l10n!.provideIdOrNameError}.',
-              );
+              showToast(context, '${context.l10n!.provideIdOrNameError}.');
             }
           }
 
@@ -144,7 +144,9 @@ Future<Map<String, String>?> showCreatePlaylistDialog(
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          context.l10n!.addPlaylist,
+                          customOnly
+                              ? context.l10n!.createNewPlaylist
+                              : context.l10n!.addPlaylist,
                           style: TextStyle(
                             color: colorScheme.onSurface,
                             fontWeight: FontWeight.w700,
@@ -155,7 +157,7 @@ Future<Map<String, String>?> showCreatePlaylistDialog(
                     ],
                   ),
                   const SizedBox(height: 20),
-                  if (songToAdd == null && songsToAdd == null)
+                  if (canImportFromYouTube)
                     Container(
                       decoration: BoxDecoration(
                         color: colorScheme.surfaceContainerHighest.withValues(
@@ -267,8 +269,7 @@ Future<Map<String, String>?> showCreatePlaylistDialog(
                         ],
                       ),
                     ),
-                  if (songToAdd == null && songsToAdd == null)
-                    const SizedBox(height: 20),
+                  if (canImportFromYouTube) const SizedBox(height: 20),
                   if (isYouTubeMode)
                     TextField(
                       decoration: InputDecoration(
@@ -380,220 +381,417 @@ Future<Map<String, String>?> showCreatePlaylistDialog(
   );
 }
 
+/// Opens the playlist picker so the user can add [song] (or [songs]) to one of
+/// their own playlists, creating a new one along the way if needed.
 void showAddToPlaylistDialog(
   BuildContext context, {
   dynamic song,
   List<dynamic>? songs,
 }) {
-  showDialog(
+  showModalBottomSheet<void>(
     context: context,
-    builder: (BuildContext context) {
-      final colorScheme = Theme.of(context).colorScheme;
-      return AlertDialog(
-        icon: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: colorScheme.secondaryContainer,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            FluentIcons.album_add_24_filled,
-            color: colorScheme.secondary,
-            size: 28,
-          ),
-        ),
-        title: Text(
-          context.l10n!.addToPlaylist,
-          style: TextStyle(
-            color: colorScheme.onSurface,
-            fontWeight: FontWeight.w600,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        content: Container(
-          width: double.maxFinite,
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * 0.6,
-          ),
-          child: Builder(
-            builder: (context) {
-              final folders = userPlaylistFolders.value
-                  .where(
-                    (folder) =>
-                        folder['playlists'] != null &&
-                        (folder['playlists'] as List).isNotEmpty,
-                  )
-                  .toList();
-              final topLevelPlaylists = getPlaylistsNotInFolders();
+    isScrollControlled: true,
+    useRootNavigator: true,
+    showDragHandle: true,
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (_) => _AddToPlaylistSheet(song: song, songs: songs),
+  );
+}
 
-              final hasAny =
-                  (folders.isNotEmpty) || (topLevelPlaylists.isNotEmpty);
+/// A user-created playlist, plus the folder holding it when it is nested.
+class _PlaylistTarget {
+  const _PlaylistTarget(this.playlist, {this.folderName});
 
-              if (!hasAny) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 32),
-                      child: Text(
-                        context.l10n!.noCustomPlaylists,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+  final Map playlist;
+  final String? folderName;
+
+  String get id => playlist['ytid']?.toString() ?? '';
+  String get title => playlist['title']?.toString() ?? '';
+  String? get image => playlist['image']?.toString();
+  List<dynamic> get songs => playlist['list'] as List<dynamic>? ?? const [];
+
+  bool matches(String query) {
+    if (query.isEmpty) return true;
+    final lowered = query.toLowerCase();
+    return title.toLowerCase().contains(lowered) ||
+        (folderName?.toLowerCase().contains(lowered) ?? false);
+  }
+}
+
+List<_PlaylistTarget> _collectUserPlaylistTargets() {
+  return [
+    for (final playlist in userCustomPlaylists.value)
+      if (playlist['source'] == 'user-created') _PlaylistTarget(playlist),
+    for (final folder in userPlaylistFolders.value)
+      for (final playlist in (folder['playlists'] as List? ?? const []))
+        if (playlist is Map && playlist['source'] == 'user-created')
+          _PlaylistTarget(playlist, folderName: folder['name']?.toString()),
+  ];
+}
+
+class _AddToPlaylistSheet extends StatefulWidget {
+  const _AddToPlaylistSheet({this.song, this.songs});
+
+  final dynamic song;
+  final List<dynamic>? songs;
+
+  @override
+  State<_AddToPlaylistSheet> createState() => _AddToPlaylistSheetState();
+}
+
+class _AddToPlaylistSheetState extends State<_AddToPlaylistSheet> {
+  /// Shorter lists are easy to scan, so the search field stays hidden.
+  static const _searchThreshold = 6;
+
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<dynamic> get _selection {
+    if (widget.song != null) return [widget.song];
+    return widget.songs ?? const [];
+  }
+
+  bool _alreadyHasSelection(_PlaylistTarget target) {
+    final selection = _selection.whereType<Map>().toList();
+    if (selection.isEmpty) return false;
+
+    final existingIds = target.songs
+        .whereType<Map>()
+        .map((song) => song['ytid']?.toString())
+        .toSet();
+    return selection.every(
+      (song) => existingIds.contains(song['ytid']?.toString()),
+    );
+  }
+
+  void _addToPlaylist(_PlaylistTarget target) {
+    final String message;
+    if (widget.song != null) {
+      message = addSongInCustomPlaylist(context, target.id, widget.song as Map);
+    } else if (widget.songs != null && widget.songs!.isNotEmpty) {
+      message = addSongsInCustomPlaylist(context, target.id, widget.songs!);
+    } else {
+      message = context.l10n!.error;
+    }
+
+    // Toast before popping: it lives in the root overlay and outlives the sheet.
+    showToast(context, message);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final media = MediaQuery.of(context);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: media.size.height * 0.8),
+        child: ListenableBuilder(
+          listenable: Listenable.merge([
+            userCustomPlaylists,
+            userPlaylistFolders,
+          ]),
+          builder: (context, _) {
+            final targets = _collectUserPlaylistTargets();
+            final visible = targets
+                .where((target) => target.matches(_query))
+                .toList();
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildHeader(colorScheme),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _CreatePlaylistTile(
+                    onTap: () =>
+                        showCreatePlaylistDialog(context, customOnly: true),
+                  ),
+                ),
+                if (targets.length >= _searchThreshold)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: (value) =>
+                          setState(() => _query = value.trim()),
+                      decoration: InputDecoration(
+                        labelText: context.l10n!.searchPlaylists,
+                        prefixIcon: Icon(
+                          FluentIcons.search_20_regular,
+                          color: colorScheme.onSurfaceVariant,
                         ),
-                        textAlign: TextAlign.center,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: colorScheme.surface,
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: visible.isEmpty
+                      ? _buildEmptyState(colorScheme, targets.isEmpty)
+                      : ListView.separated(
+                          padding: EdgeInsets.fromLTRB(
+                            20,
+                            0,
+                            20,
+                            media.padding.bottom + 20,
+                          ),
+                          shrinkWrap: true,
+                          itemCount: visible.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            final target = visible[index];
+                            return _PlaylistTargetTile(
+                              target: target,
+                              isAlreadyAdded: _alreadyHasSelection(target),
+                              onTap: () => _addToPlaylist(target),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(ColorScheme colorScheme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: colorScheme.secondaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              FluentIcons.album_add_24_filled,
+              color: colorScheme.onSecondaryContainer,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              context.l10n!.addToPlaylist,
+              style: TextStyle(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+                fontSize: 20,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(ColorScheme colorScheme, bool hasNoPlaylists) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+      child: Text(
+        hasNoPlaylists
+            ? context.l10n!.noCustomPlaylists
+            : context.l10n!.noPlaylistsFound,
+        textAlign: TextAlign.center,
+        style: TextStyle(color: colorScheme.onSurfaceVariant),
+      ),
+    );
+  }
+}
+
+class _CreatePlaylistTile extends StatelessWidget {
+  const _CreatePlaylistTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: colorScheme.primaryContainer,
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: colorScheme.onPrimaryContainer.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  FluentIcons.add_24_filled,
+                  color: colorScheme.onPrimaryContainer,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  context.l10n!.createNewPlaylist,
+                  style: TextStyle(
+                    color: colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaylistTargetTile extends StatelessWidget {
+  const _PlaylistTargetTile({
+    required this.target,
+    required this.isAlreadyAdded,
+    required this.onTap,
+  });
+
+  final _PlaylistTarget target;
+  final bool isAlreadyAdded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final folderName = target.folderName;
+    final subtitle = [
+      '${target.songs.length} ${context.l10n!.songs.toLowerCase()}',
+      if (folderName != null && folderName.isNotEmpty) folderName,
+    ].join(' · ');
+
+    return Material(
+      color: colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              _PlaylistThumbnail(image: target.image),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      target.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
-                );
-              }
-
-              return ListView.builder(
-                itemCount: folders.length + topLevelPlaylists.length,
-                shrinkWrap: true,
-                itemBuilder: (context, index) {
-                  if (index < folders.length) {
-                    final folder = folders[index];
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: ExpansionTile(
-                        collapsedBackgroundColor:
-                            colorScheme.surfaceContainerLow,
-                        backgroundColor: colorScheme.surfaceContainerLowest,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: commonBarRadius,
-                        ),
-                        collapsedShape: RoundedRectangleBorder(
-                          borderRadius: commonBarRadius,
-                        ),
-                        tilePadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        leading: Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: colorScheme.secondaryContainer,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            FluentIcons.folder_24_regular,
-                            color: colorScheme.secondary,
-                            size: 22,
-                          ),
-                        ),
-                        title: Text(
-                          folder['name'] ?? '',
-                          style: TextStyle(
-                            color: colorScheme.onSurface,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 15,
-                          ),
-                        ),
-                        children: [
-                          for (final p in (folder['playlists'] as List? ?? []))
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                left: 16,
-                                right: 16,
-                              ),
-                              child: DialogItem(
-                                icon: FluentIcons.text_bullet_list_24_filled,
-                                iconColor: colorScheme.tertiary,
-                                iconBgColor: colorScheme.tertiaryContainer,
-                                label: p['title'] ?? '',
-                                onTap: () {
-                                  if (song != null) {
-                                    showToast(
-                                      context,
-                                      addSongInCustomPlaylist(
-                                        context,
-                                        p['ytid'],
-                                        song,
-                                      ),
-                                    );
-                                  } else if (songs != null &&
-                                      songs.isNotEmpty) {
-                                    showToast(
-                                      context,
-                                      addSongsInCustomPlaylist(
-                                        context,
-                                        p['ytid'],
-                                        songs,
-                                      ),
-                                    );
-                                  }
-                                  Navigator.pop(context);
-                                },
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  final playlistIndex = index - folders.length;
-                  final playlist = topLevelPlaylists[playlistIndex];
-
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: DialogItem(
-                      icon: FluentIcons.text_bullet_list_24_filled,
-                      iconColor: colorScheme.tertiary,
-                      iconBgColor: colorScheme.tertiaryContainer,
-                      label: playlist['title'] ?? '',
-                      onTap: () {
-                        if (song != null) {
-                          showToast(
-                            context,
-                            addSongInCustomPlaylist(
-                              context,
-                              playlist['ytid'],
-                              song,
-                            ),
-                          );
-                        } else if (songs != null && songs.isNotEmpty) {
-                          showToast(
-                            context,
-                            addSongsInCustomPlaylist(
-                              context,
-                              playlist['ytid'],
-                              songs,
-                            ),
-                          );
-                        }
-                        Navigator.pop(context);
-                      },
-                    ),
-                  );
-                },
-              );
-            },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                isAlreadyAdded
+                    ? FluentIcons.checkmark_circle_24_filled
+                    : FluentIcons.add_circle_24_regular,
+                color: isAlreadyAdded
+                    ? colorScheme.primary
+                    : colorScheme.onSurfaceVariant,
+                size: 22,
+              ),
+            ],
           ),
         ),
-        actionsAlignment: MainAxisAlignment.end,
-        actions: [
-          TextButton(
-            child: Text(context.l10n!.cancel),
-            onPressed: () => Navigator.pop(context),
-          ),
-          FilledButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              showCreatePlaylistDialog(
-                context,
-                songToAdd: song,
-                songsToAdd: songs,
-              );
-            },
-            icon: const Icon(FluentIcons.add_24_regular, size: 18),
-            label: Text(context.l10n!.addPlaylist),
-          ),
-        ],
-      );
-    },
-  );
+      ),
+    );
+  }
+}
+
+class _PlaylistThumbnail extends StatelessWidget {
+  const _PlaylistThumbnail({required this.image});
+
+  final String? image;
+
+  static const double _size = 48;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final artwork = image;
+
+    if (artwork == null || artwork.isEmpty) return _fallback(colorScheme);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image(
+        image: ArtworkProvider.get(artwork),
+        width: _size,
+        height: _size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _fallback(colorScheme),
+      ),
+    );
+  }
+
+  Widget _fallback(ColorScheme colorScheme) {
+    return Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        color: colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(
+        FluentIcons.text_bullet_list_24_filled,
+        size: 22,
+        color: colorScheme.onSecondaryContainer,
+      ),
+    );
+  }
 }

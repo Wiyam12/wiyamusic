@@ -57,7 +57,25 @@ class UserCreatedPlaylistPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PlaylistPage(playlistId: playlistId, playlistData: playlistData);
+    final resolvedId =
+        playlistId ??
+        (playlistData is Map ? playlistData['ytid']?.toString() : null);
+
+    // Always prefer the live stored playlist so song removals survive reopen.
+    Map? stored;
+    if (resolvedId != null && resolvedId.isNotEmpty) {
+      for (final playlist in getUserCustomPlaylists()) {
+        if (playlist['ytid']?.toString() == resolvedId) {
+          stored = playlist;
+          break;
+        }
+      }
+    }
+
+    return PlaylistPage(
+      playlistId: resolvedId,
+      playlistData: stored ?? playlistData,
+    );
   }
 }
 

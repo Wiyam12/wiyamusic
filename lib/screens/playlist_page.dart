@@ -41,6 +41,7 @@ import 'package:wiyamusic/utilities/playlist_utils.dart';
 import 'package:wiyamusic/utilities/song_filtering.dart';
 import 'package:wiyamusic/utilities/sort_utils.dart';
 import 'package:wiyamusic/widgets/bottom_sheet_bar.dart';
+import 'package:wiyamusic/widgets/edit_playlist_dialog.dart';
 import 'package:wiyamusic/widgets/mini_player_bottom_space.dart';
 import 'package:wiyamusic/widgets/playlist_page/empty_playlist_state.dart';
 import 'package:wiyamusic/widgets/playlist_page/search_bar_section.dart';
@@ -424,6 +425,23 @@ class _PlaylistPageState extends State<PlaylistPage> {
     ];
   }
 
+  /// Label for the like action, matching the kind of content being viewed.
+  String _likeActionLabel({required bool isLiked}) {
+    if (widget.isArtist) {
+      return isLiked
+          ? context.l10n!.removeFromLikedArtists
+          : context.l10n!.addToLikedArtists;
+    }
+    if (_playlist?['isAlbum'] == true) {
+      return isLiked
+          ? context.l10n!.removeFromLikedAlbums
+          : context.l10n!.addToLikedAlbums;
+    }
+    return isLiked
+        ? context.l10n!.removeFromLikedPlaylists
+        : context.l10n!.addToLikedPlaylists;
+  }
+
   void _showPlaylistOptionsSheet() {
     final colorScheme = Theme.of(context).colorScheme;
     final songs = _playlist['list'] as List? ?? [];
@@ -433,6 +451,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
         playlistId.isNotEmpty &&
         isPlaylistFullyOffline(songs);
     final isLiked = playlistLikeStatus.value;
+    final isUserCreated = _playlist?['source'] == 'user-created';
 
     showModalBottomSheet<void>(
       context: context,
@@ -445,61 +464,199 @@ class _PlaylistPageState extends State<PlaylistPage> {
       builder: (sheetContext) {
         final bottomSafe = MediaQuery.paddingOf(sheetContext).bottom;
         return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(12, 0, 12, bottomSafe + 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                BottomSheetBar(
-                  isLiked
-                      ? context.l10n!.removeFromLikedPlaylists
-                      : context.l10n!.addToLikedPlaylists,
-                  () {
-                    Navigator.pop(sheetContext);
-                    if (playlistId == null || playlistId.isEmpty) {
-                      showToast(context, context.l10n!.error);
-                      return;
-                    }
-                    final nextLiked = !playlistLikeStatus.value;
-                    playlistLikeStatus.value = nextLiked;
-
-                    Map<String, dynamic>? playlistData;
-                    if (_playlist is Map) {
-                      playlistData = Map<String, dynamic>.from(
-                        (_playlist as Map).map(
-                          (key, value) => MapEntry(key.toString(), value),
-                        ),
-                      );
-                      playlistData['ytid'] = playlistId;
-                    } else {
-                      playlistData = {'ytid': playlistId};
-                    }
-
-                    unawaited(
-                      updatePlaylistLikeStatus(
-                        playlistId,
-                        nextLiked,
-                        playlistData: playlistData,
-                      ),
-                    );
-                  },
-                  false,
-                  icon: isLiked
-                      ? FluentIcons.heart_off_24_regular
-                      : FluentIcons.heart_24_regular,
-                ),
-                if (playlistId != null && playlistId.isNotEmpty)
-                  _buildDownloadSheetAction(
-                    sheetContext: sheetContext,
-                    playlistId: playlistId,
-                    songs: songs,
-                    isOffline: isOffline,
-                  ),
-              ],
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(12, 0, 12, bottomSafe + 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // A user-created playlist already lives in the library, so
+                  // liking it would be a no-op.
+                  if (!isUserCreated)
+                    BottomSheetBar(
+                      _likeActionLabel(isLiked: isLiked),
+                      () {
+                        Navigator.pop(sheetContext);
+                        _toggleLikeStatus(playlistId);
+                      },
+                      false,
+                      icon: isLiked
+                          ? FluentIcons.heart_off_24_regular
+                          : FluentIcons.heart_24_regular,
+                    ),
+                  // Save remote / liked content as a user playlist in one tap.
+                  if (!isUserCreated && songs.isNotEmpty)
+                    BottomSheetBar(
+                      context.l10n!.addToPlaylist,
+                      () {
+                        Navigator.pop(sheetContext);
+                        _saveCurrentAsUserPlaylist();
+                      },
+                      false,
+                      icon: FluentIcons.album_add_24_regular,
+                    ),
+                  if (playlistId != null && playlistId.isNotEmpty)
+                    _buildDownloadSheetAction(
+                      sheetContext: sheetContext,
+                      playlistId: playlistId,
+                      songs: songs,
+                      isOffline: isOffline,
+                    ),
+                  if (isUserCreated) ...[
+                    BottomSheetBar(
+                      context.l10n!.editPlaylist,
+                      () {
+                        Navigator.pop(sheetContext);
+                        unawaited(_editUserPlaylist());
+                      },
+                      false,
+                      icon: FluentIcons.edit_24_regular,
+                    ),
+                    BottomSheetBar(
+                      context.l10n!.deletePlaylist,
+                      () {
+                        Navigator.pop(sheetContext);
+                        _confirmDeleteUserPlaylist();
+                      },
+                      false,
+                      icon: FluentIcons.delete_24_regular,
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         );
       },
+    );
+  }
+
+  /// Creates a user playlist with the same title and cover, then copies all songs.
+  void _saveCurrentAsUserPlaylist() {
+    final songs = (_playlist?['list'] as List?) ?? const [];
+    if (songs.isEmpty) {
+      showToast(context, context.l10n!.noSongsInPlaylist);
+      return;
+    }
+
+    final rawTitle = _playlist?['title']?.toString() ?? '';
+    final title = widget.isArtist
+        ? normalizeArtistDisplayTitle(rawTitle)
+        : rawTitle.trim();
+    if (title.isEmpty) {
+      showToast(context, context.l10n!.error);
+      return;
+    }
+
+    final image = widget.isArtist
+        ? normalizeArtistThumbnailUrl(_playlist?['image']?.toString())
+        : _playlist?['image']?.toString();
+
+    final matching = getUserCustomPlaylists().where((playlist) {
+      final existingTitle = playlist['title']?.toString().trim().toLowerCase();
+      return existingTitle == title.toLowerCase();
+    }).toList();
+
+    if (matching.isNotEmpty) {
+      final existingId = matching.first['ytid']?.toString();
+      if (existingId == null || existingId.isEmpty) {
+        showToast(context, context.l10n!.error);
+        return;
+      }
+      showToast(context, addSongsInCustomPlaylist(context, existingId, songs));
+      return;
+    }
+
+    final (_, newPlaylistId) = createCustomPlaylist(title, image, context);
+    showToast(context, addSongsInCustomPlaylist(context, newPlaylistId, songs));
+  }
+
+  void _toggleLikeStatus(String? playlistId) {
+    if (playlistId == null || playlistId.isEmpty) {
+      showToast(context, context.l10n!.error);
+      return;
+    }
+
+    final nextLiked = !playlistLikeStatus.value;
+    playlistLikeStatus.value = nextLiked;
+
+    Map<String, dynamic> playlistData;
+    if (_playlist is Map) {
+      playlistData = Map<String, dynamic>.from(
+        (_playlist as Map).map((key, value) => MapEntry(key.toString(), value)),
+      );
+      playlistData['ytid'] = playlistId;
+    } else {
+      playlistData = {'ytid': playlistId};
+    }
+
+    unawaited(
+      updatePlaylistLikeStatus(
+        playlistId,
+        nextLiked,
+        playlistData: playlistData,
+      ),
+    );
+  }
+
+  /// Renames a user-created playlist and/or replaces its cover image.
+  Future<void> _editUserPlaylist() async {
+    final playlist = _playlist;
+    if (playlist is! Map) return;
+
+    final updated = await showDialog<Map?>(
+      context: context,
+      builder: (_) => EditPlaylistDialog(playlistData: playlist),
+    );
+    if (updated == null || !mounted) return;
+
+    final playlistId = updated['ytid']?.toString();
+    final playlists = List<Map>.from(userCustomPlaylists.value);
+    final index = playlists.indexWhere(
+      (item) => item['ytid']?.toString() == playlistId,
+    );
+    if (index == -1) {
+      showToast(context, context.l10n!.error);
+      return;
+    }
+
+    playlists[index] = updated;
+    userCustomPlaylists.value = playlists;
+    unawaited(addOrUpdateData<List<Map>>('user', 'customPlaylists', playlists));
+    unawaited(syncOfflinePlaylistMetadata(updated));
+
+    setState(() {
+      _playlist = updated;
+      _originalPlaylistList = List<dynamic>.from(
+        updated['list'] as List? ?? const [],
+      );
+      _sortPlaylist(_sortType);
+    });
+    unawaited(_updateHeaderContrast());
+    showToast(context, context.l10n!.playlistUpdated);
+  }
+
+  void _confirmDeleteUserPlaylist() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.l10n!.deletePlaylist),
+        content: Text(context.l10n!.removePlaylistQuestion),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(context.l10n!.cancel),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              removeUserCustomPlaylist(_playlist);
+              if (mounted) Navigator.pop(context, true);
+            },
+            child: Text(context.l10n!.confirm),
+          ),
+        ],
+      ),
     );
   }
 
@@ -696,7 +853,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   void _updateSongsListOnRemove(int indexOfRemovedSong, dynamic songToRemove) {
     _originalPlaylistList.removeWhere((s) => s['ytid'] == songToRemove['ytid']);
-    final playlistId = _playlist['ytid'];
+    final playlistId = _playlist['ytid']?.toString();
     if (mounted) {
       setState(() {});
       showToastWithButton(
@@ -704,11 +861,22 @@ class _PlaylistPageState extends State<PlaylistPage> {
         context.l10n!.songRemoved,
         context.l10n!.undo.toUpperCase(),
         () {
+          if (playlistId == null || playlistId.isEmpty) return;
           addSongInCustomPlaylist(
             context,
             playlistId,
             songToRemove,
             indexToInsert: indexOfRemovedSong,
+          );
+          // Re-sync the page-local list after undo writes to storage.
+          final safeIndex = indexOfRemovedSong.clamp(
+            0,
+            (_playlist['list'] as List? ?? const []).length,
+          );
+          (_playlist['list'] as List).insert(safeIndex, songToRemove);
+          _originalPlaylistList.insert(
+            indexOfRemovedSong.clamp(0, _originalPlaylistList.length),
+            songToRemove,
           );
           if (mounted) setState(() {});
         },

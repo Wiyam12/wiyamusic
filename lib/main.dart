@@ -35,6 +35,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/localization/app_localizations.dart';
+import 'package:wiyamusic/screens/splash_screen.dart';
 import 'package:wiyamusic/services/audio_service.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
@@ -47,6 +48,7 @@ import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/services/update_manager.dart';
 import 'package:wiyamusic/theme/app_themes.dart';
+import 'package:wiyamusic/theme/design_tokens.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/language_utils.dart';
 import 'package:wiyamusic/utilities/playlist_utils.dart';
@@ -279,11 +281,65 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
   }
 }
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await initialisation();
+  runApp(const AppBootstrap());
+}
 
-  runApp(const WiyaMusic());
+/// Shows the branded splash while Hive / audio / router finish booting.
+class AppBootstrap extends StatefulWidget {
+  const AppBootstrap({super.key});
+
+  @override
+  State<AppBootstrap> createState() => _AppBootstrapState();
+}
+
+class _AppBootstrapState extends State<AppBootstrap> {
+  static const _minimumSplash = Duration(milliseconds: 1600);
+
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_bootstrap());
+  }
+
+  Future<void> _bootstrap() async {
+    final started = DateTime.now();
+    await initialisation();
+
+    final elapsed = DateTime.now().difference(started);
+    if (elapsed < _minimumSplash) {
+      await Future<void>.delayed(_minimumSplash - elapsed);
+    }
+
+    if (mounted) {
+      setState(() => _ready = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 480),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: _ready
+          ? const WiyaMusic(key: ValueKey('wiyamusic-app'))
+          : MaterialApp(
+              key: const ValueKey('wiyamusic-splash'),
+              debugShowCheckedModeBanner: false,
+              theme: ThemeData(
+                brightness: Brightness.dark,
+                colorScheme: WiyaDesign.darkColorScheme,
+                scaffoldBackgroundColor: WiyaDesign.background,
+                useMaterial3: true,
+              ),
+              home: const SplashScreen(),
+            ),
+    );
+  }
 }
 
 Future<void> initialisation() async {

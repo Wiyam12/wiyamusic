@@ -23,10 +23,10 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:animated_icon/animated_icon.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/models/full_player_state.dart';
@@ -35,6 +35,7 @@ import 'package:wiyamusic/screens/now_playing_page.dart';
 import 'package:wiyamusic/theme/design_tokens.dart';
 import 'package:wiyamusic/widgets/marquee.dart';
 import 'package:wiyamusic/widgets/song_artwork.dart';
+import 'package:wiyamusic/widgets/wiya_animated_icon.dart';
 
 final Stream<FullPlayerState> _fullPlayerStateStream =
     Rx.combineLatest3(
@@ -544,9 +545,10 @@ class _ControlsWidget extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (isPlaying) ...[
-          LoadingAnimationWidget.staggeredDotsWave(
-            color: colorScheme.primary,
+          WiyaAnimatedIcon(
+            icon: AnimateIcons.activity,
             size: 22,
+            color: colorScheme.primary,
           ),
           const SizedBox(width: 6),
         ],
