@@ -25,6 +25,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart' show logger, audioHandler;
+import 'package:wiyamusic/models/playback_context.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/playlist_download_service.dart';
@@ -347,20 +348,45 @@ class _UserSongsPageState extends State<UserSongsPage> {
         'ytid': '',
         'title': title,
         'source': 'user-created',
+        'playbackKind': _playbackKindForPage().name,
         'list': sortedList,
       },
       songIndex: 0,
+      context: _playbackContextForPage(title),
     );
   }
 
   Future<void> _shuffleAll() async {
     final songs = _songsNotifier.value;
     if (songs.isEmpty) return;
-    final shuffled = List<Map>.from(songs.whereType<Map>())..shuffle();
-    await audioHandler.addPlaylistToQueue(
-      shuffled,
-      replace: true,
-      startIndex: 0,
+    final title = _titleForPage(context);
+    await audioHandler.playPlaylistSong(
+      playlist: {
+        'ytid': '',
+        'title': title,
+        'source': 'user-created',
+        'playbackKind': _playbackKindForPage().name,
+        'list': songs,
+      },
+      songIndex: 0,
+      context: _playbackContextForPage(title),
+      enableShuffle: true,
+    );
+  }
+
+  PlaybackSourceKind _playbackKindForPage() {
+    return switch (widget.page) {
+      'liked' => PlaybackSourceKind.likedSongs,
+      'offline' => PlaybackSourceKind.offlineSongs,
+      'recents' => PlaybackSourceKind.recentlyPlayed,
+      _ => PlaybackSourceKind.other,
+    };
+  }
+
+  PlaybackContext _playbackContextForPage(String title) {
+    return PlaybackContext(
+      kind: _playbackKindForPage(),
+      title: title,
     );
   }
 
@@ -533,6 +559,7 @@ class _UserSongsPageState extends State<UserSongsPage> {
           'ytid': '',
           'title': title,
           'source': 'user-created',
+          'playbackKind': _playbackKindForPage().name,
           'list': sortedList,
         };
 
@@ -602,11 +629,15 @@ class _UserSongsPageState extends State<UserSongsPage> {
         audioHandler.playPlaylistSong(
           playlist: playlist,
           songIndex: fullIndex != -1 ? fullIndex : index,
+          context: _playbackContextForPage(
+            playlist['title']?.toString() ?? _titleForPage(context),
+          ),
         );
       },
       borderRadius: borderRadius,
       isRecentSong: isRecentSong,
       isFromLikedSongs: isLikedSongs,
+      showPlayingIndicator: true,
     );
   }
 

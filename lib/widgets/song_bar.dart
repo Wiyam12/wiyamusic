@@ -31,6 +31,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/models/playback_context.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
@@ -533,7 +534,14 @@ class _SongBarState extends State<SongBar> {
     }
 
     if (widget.clearPlaylist) {
-      audioHandler.addPlaylistToQueue([widget.song], replace: true);
+      audioHandler.addPlaylistToQueue(
+        [widget.song],
+        replace: true,
+        context: PlaybackContext.singleSong(
+          id: widget.song['ytid']?.toString(),
+          title: widget.song['title']?.toString(),
+        ),
+      );
     } else {
       audioHandler.playSong(widget.song);
     }

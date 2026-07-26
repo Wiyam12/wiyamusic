@@ -22,11 +22,17 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/models/playback_context.dart';
 
 class ShufflePlayButton extends StatelessWidget {
-  const ShufflePlayButton({super.key, required this.songs});
+  const ShufflePlayButton({
+    super.key,
+    required this.songs,
+    this.playbackContext,
+  });
 
   final List songs;
+  final PlaybackContext? playbackContext;
 
   @override
   Widget build(BuildContext context) {
@@ -38,11 +44,15 @@ class ShufflePlayButton extends StatelessWidget {
         if (songs.isEmpty) return;
         final shuffledSongs = List<Map>.from(songs.whereType<Map>());
         if (shuffledSongs.isEmpty) return;
-        shuffledSongs.shuffle();
+
         await audioHandler.addPlaylistToQueue(
-          shuffledSongs,
+          shuffledSongs..shuffle(),
           replace: true,
           startIndex: 0,
+          context:
+              playbackContext ??
+              const PlaybackContext(kind: PlaybackSourceKind.other),
+          enableShuffle: true,
         );
       },
     );

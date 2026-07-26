@@ -3,16 +3,35 @@ import 'package:flutter/material.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/utilities/playlist_image_picker.dart';
 
-class EditPlaylistDialog extends StatefulWidget {
-  const EditPlaylistDialog({super.key, required this.playlistData});
+/// Presents the playlist editor as a modal bottom sheet and returns the updated
+/// playlist map (or `null` when cancelled).
+Future<Map?> showEditPlaylistSheet(
+  BuildContext context, {
+  required Map playlistData,
+}) {
+  return showModalBottomSheet<Map?>(
+    context: context,
+    isScrollControlled: true,
+    useRootNavigator: true,
+    showDragHandle: true,
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) => _EditPlaylistSheet(playlistData: playlistData),
+  );
+}
+
+class _EditPlaylistSheet extends StatefulWidget {
+  const _EditPlaylistSheet({required this.playlistData});
 
   final Map playlistData;
 
   @override
-  State<EditPlaylistDialog> createState() => _EditPlaylistDialogState();
+  State<_EditPlaylistSheet> createState() => _EditPlaylistSheetState();
 }
 
-class _EditPlaylistDialogState extends State<EditPlaylistDialog> {
+class _EditPlaylistSheetState extends State<_EditPlaylistSheet> {
   late TextEditingController _titleController;
   late TextEditingController _imageUrlController;
   String? _imageBase64;
@@ -50,31 +69,66 @@ class _EditPlaylistDialogState extends State<EditPlaylistDialog> {
     }
   }
 
+  void _submit() {
+    final newPlaylist = {
+      'ytid': widget.playlistData['ytid'],
+      'title': _titleController.text,
+      'source': widget.playlistData['source'] ?? 'user-created',
+      if (_imageBase64 != null)
+        'image': _imageBase64
+      else if (_imageUrlController.text.isNotEmpty)
+        'image': _imageUrlController.text,
+      'list': widget.playlistData['list'],
+      if (widget.playlistData['createdAt'] != null)
+        'createdAt': widget.playlistData['createdAt'],
+    };
+
+    Navigator.pop(context, newPlaylist);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomSafe = MediaQuery.paddingOf(context).bottom;
 
-    Widget _imagePreview() {
-      return buildImagePreview(
-        imageBase64: _imageBase64,
-        imageUrl: _imageUrlController.text.isEmpty
-            ? null
-            : _imageUrlController.text,
-      );
-    }
-
-    return AlertDialog(
-      title: Text(
-        context.l10n!.editPlaylist,
-        style: TextStyle(
-          color: colorScheme.onSurface,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      content: SingleChildScrollView(
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(20, 0, 20, bottomSafe + 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    FluentIcons.edit_24_regular,
+                    color: colorScheme.primary,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    context.l10n!.editPlaylist,
+                    style: TextStyle(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 20,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
             TextField(
               controller: _titleController,
               decoration: InputDecoration(
@@ -87,7 +141,7 @@ class _EditPlaylistDialogState extends State<EditPlaylistDialog> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 filled: true,
-                fillColor: colorScheme.surfaceContainerLow,
+                fillColor: colorScheme.surface,
               ),
             ),
             if (_imageBase64 == null) ...[
@@ -104,7 +158,7 @@ class _EditPlaylistDialogState extends State<EditPlaylistDialog> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   filled: true,
-                  fillColor: colorScheme.surfaceContainerLow,
+                  fillColor: colorScheme.surface,
                 ),
                 onChanged: (_) => setState(() => _imageBase64 = null),
               ),
@@ -112,40 +166,50 @@ class _EditPlaylistDialogState extends State<EditPlaylistDialog> {
             const SizedBox(height: 12),
             if (_imageUrlController.text.isEmpty || _imageBase64 != null) ...[
               buildImagePickerRow(context, _pickImage, _imageBase64 != null),
-              _imagePreview(),
+              Center(
+                child: buildImagePreview(
+                  imageBase64: _imageBase64,
+                  imageUrl: _imageUrlController.text.isEmpty
+                      ? null
+                      : _imageUrlController.text,
+                ),
+              ),
             ],
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: colorScheme.outline),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: Text(context.l10n!.cancel),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _submit,
+                    icon: const Icon(FluentIcons.save_20_regular),
+                    label: Text(context.l10n!.update),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(
-            context.l10n!.cancel,
-            style: TextStyle(color: colorScheme.onSurfaceVariant),
-          ),
-        ),
-        FilledButton.icon(
-          onPressed: () {
-            final newPlaylist = {
-              'ytid': widget.playlistData['ytid'],
-              'title': _titleController.text,
-              'source': widget.playlistData['source'] ?? 'user-created',
-              if (_imageBase64 != null)
-                'image': _imageBase64
-              else if (_imageUrlController.text.isNotEmpty)
-                'image': _imageUrlController.text,
-              'list': widget.playlistData['list'],
-              if (widget.playlistData['createdAt'] != null)
-                'createdAt': widget.playlistData['createdAt'],
-            };
-
-            Navigator.pop(context, newPlaylist);
-          },
-          icon: const Icon(FluentIcons.save_20_regular),
-          label: Text(context.l10n!.update),
-        ),
-      ],
     );
   }
 }

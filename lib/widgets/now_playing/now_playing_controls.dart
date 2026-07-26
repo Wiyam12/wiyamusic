@@ -506,9 +506,11 @@ class PlayerControlButtons extends StatelessWidget {
                 ),
                 _FlatControlButton(
                   icon: FluentIcons.next_24_filled,
+                  // Repeat All keeps Next enabled so the last song can loop
+                  // back to the first track of the current playlist.
                   isEnabled:
                       audioHandler.hasNext ||
-                      repeatMode == AudioServiceRepeatMode.one,
+                      repeatMode != AudioServiceRepeatMode.none,
                   tooltip: context.l10n!.skipToNext,
                   onPressed: () => repeatMode == AudioServiceRepeatMode.one
                       ? audioHandler.playAgain()

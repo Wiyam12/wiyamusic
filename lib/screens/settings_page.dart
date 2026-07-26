@@ -19,8 +19,6 @@
  *     please visit: https://github.com/Wiyam12/wiyamusic
  */
 
-import 'dart:io';
-
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -784,37 +782,7 @@ class SettingsPage extends StatelessWidget {
   }
 
   Future<void> _backupUserData(BuildContext context) async {
-    final colorScheme = Theme.of(context).colorScheme;
-
     try {
-      // Android-only heads-up about scoped-storage folder limits.
-      if (Platform.isAndroid && context.mounted) {
-        await showDialog(
-          context: context,
-          builder: (BuildContext context) {
-            return AlertDialog(
-              icon: Icon(
-                FluentIcons.info_24_regular,
-                color: colorScheme.primary,
-                size: 32,
-              ),
-              content: Text(
-                context.l10n!.folderRestrictions,
-                style: TextStyle(color: colorScheme.onSurfaceVariant),
-                textAlign: TextAlign.center,
-              ),
-              actionsAlignment: MainAxisAlignment.center,
-              actions: <Widget>[
-                FilledButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(context.l10n!.understand),
-                ),
-              ],
-            );
-          },
-        );
-      }
-
       if (!context.mounted) return;
       final result = await backupData(context);
       if (context.mounted) {

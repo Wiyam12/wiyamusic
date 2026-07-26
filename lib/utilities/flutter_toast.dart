@@ -100,6 +100,30 @@ void showToastWithButton(
   );
 }
 
+/// Resolves the overlay to host the toast.
+///
+/// Callers often pass a navigator's own context (such as
+/// `NavigationManager().context`). A navigator builds its overlay as a child,
+/// so the usual ancestor lookup finds nothing there and the toast would be
+/// dropped; fall back to searching downwards in that case.
+OverlayState? _resolveOverlay(BuildContext context) {
+  final ancestor = Overlay.maybeOf(context);
+  if (ancestor != null) return ancestor;
+
+  OverlayState? descendant;
+  void visit(Element element) {
+    if (descendant != null) return;
+    if (element is StatefulElement && element.state is OverlayState) {
+      descendant = element.state as OverlayState;
+      return;
+    }
+    element.visitChildren(visit);
+  }
+
+  context.visitChildElements(visit);
+  return descendant;
+}
+
 void _showTopToast(
   BuildContext context, {
   required Duration duration,
@@ -110,7 +134,7 @@ void _showTopToast(
   )
   builder,
 }) {
-  final overlay = Overlay.maybeOf(context);
+  final overlay = _resolveOverlay(context);
   if (overlay == null) return;
 
   final theme = Theme.of(context);

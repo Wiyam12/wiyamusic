@@ -1247,6 +1247,59 @@ Future<Map<String, dynamic>?> resolveArtistInfoForWidget(
   return {...artist, 'source': 'youtube-artist', 'isArtist': true, 'list': []};
 }
 
+/// Persists edits (title/image/etc.) for a user-created playlist, whether it
+/// lives at the top level or inside a folder. Returns `true` when the playlist
+/// was found and updated.
+///
+/// The previous edit flow only searched [userCustomPlaylists] via `indexOf`, so
+/// playlists opened from inside a folder (index `-1`) silently dropped their
+/// changes — the image never updated. Routing through [_findCustomPlaylist]
+/// mutates the canonical stored map and saves to the correct key.
+Future<bool> updateUserPlaylistMetadata(Map updatedPlaylist) async {
+  final playlistId = updatedPlaylist['ytid']?.toString();
+  if (playlistId == null || playlistId.isEmpty) return false;
+
+  final found = _findCustomPlaylist(playlistId);
+  if (found == null) return false;
+
+  final stored = found.playlist;
+  stored['title'] = updatedPlaylist['title'];
+  if (updatedPlaylist.containsKey('image')) {
+    stored['image'] = updatedPlaylist['image'];
+  } else {
+    stored.remove('image');
+  }
+  if (updatedPlaylist['source'] != null) {
+    stored['source'] = updatedPlaylist['source'];
+  }
+  if (updatedPlaylist['list'] != null) {
+    stored['list'] = updatedPlaylist['list'];
+  }
+  if (updatedPlaylist['createdAt'] != null) {
+    stored['createdAt'] = updatedPlaylist['createdAt'];
+  }
+
+  if (found.isFromFolder) {
+    userPlaylistFolders.value = List<Map>.from(userPlaylistFolders.value);
+    unawaited(
+      addOrUpdateData<List>('user', 'playlistFolders', userPlaylistFolders.value),
+    );
+  } else {
+    final updated = List<Map>.from(userCustomPlaylists.value);
+    final index = updated.indexWhere(
+      (p) => p['ytid']?.toString() == playlistId,
+    );
+    if (index != -1) {
+      updated[index] = stored;
+    }
+    userCustomPlaylists.value = updated;
+    unawaited(addOrUpdateData<List>('user', 'customPlaylists', updated));
+  }
+
+  await syncOfflinePlaylistMetadata(stored);
+  return true;
+}
+
 ({Map playlist, bool isFromFolder})? _findCustomPlaylist(String playlistId) {
   final normalizedId = playlistId.trim();
   if (normalizedId.isEmpty) return null;

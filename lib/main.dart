@@ -39,6 +39,7 @@ import 'package:wiyamusic/screens/splash_screen.dart';
 import 'package:wiyamusic/services/audio_service.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
+import 'package:wiyamusic/services/download_notification_service.dart';
 import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/listening_stats_service.dart';
 import 'package:wiyamusic/services/logger_service.dart';
@@ -182,10 +183,10 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
         }
       } else {
         if (shouldWeCheckUpdates.value == null) {
-          // show dialog that asks user if they want to enable update checks
-          SchedulerBinding.instance.addPostFrameCallback((_) {
-            showUpdateCheckDialog(NavigationManager().context);
-          });
+          // Temporarily disabled: update-check consent modal
+          // SchedulerBinding.instance.addPostFrameCallback((_) {
+          //   showUpdateCheckDialog(NavigationManager().context);
+          // });
         } else {
           SchedulerBinding.instance.addPostFrameCallback((_) async {
             if (!offlineMode.value) {
@@ -358,13 +359,16 @@ Future<void> initialisation() async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.wiyamusic.app',
         androidNotificationChannelName: 'WiyaMusic',
-        androidNotificationIcon: 'drawable/ic_launcher_foreground',
+        androidNotificationIcon: 'drawable/ic_notification',
         androidShowNotificationBadge: true,
         // Leave foreground on pause so the notification can be swiped away,
         // and so stop()/X can actually cancel it on modern Android.
         androidStopForegroundOnPause: true,
       ),
     );
+
+    // Download progress notifications (playlist / song offline downloads).
+    await downloadNotificationService.init();
 
     // Init router
     NavigationManager.instance;

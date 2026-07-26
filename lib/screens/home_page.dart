@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:wiyamusic/constants/app_constants.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/models/playback_context.dart';
 import 'package:wiyamusic/services/common_services.dart';
 // import 'package:wiyamusic/services/listening_stats_service.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
@@ -196,9 +197,14 @@ class _HomePageState extends State<HomePage> {
         'ytid': '',
         'title': context.l10n!.recentlyPlayed,
         'source': 'user-created',
+        'playbackKind': PlaybackSourceKind.recentlyPlayed.name,
         'list': queue,
       },
       songIndex: safeIndex,
+      context: PlaybackContext(
+        kind: PlaybackSourceKind.recentlyPlayed,
+        title: context.l10n!.recentlyPlayed,
+      ),
     );
   }
 
@@ -356,8 +362,16 @@ class _HomePageState extends State<HomePage> {
           actionLabel: context.l10n!.play,
           onAction: () async {
             await audioHandler.playPlaylistSong(
-              playlist: {'title': recommendedTitle, 'list': data},
+              playlist: {
+                'title': recommendedTitle,
+                'list': data,
+                'playbackKind': PlaybackSourceKind.home.name,
+              },
               songIndex: 0,
+              context: PlaybackContext(
+                kind: PlaybackSourceKind.home,
+                title: recommendedTitle,
+              ),
             );
           },
         ),
@@ -383,6 +397,20 @@ class _HomePageState extends State<HomePage> {
                     true,
                     backgroundColor: Colors.transparent,
                     borderRadius: borderRadius,
+                    onPlay: () {
+                      audioHandler.playPlaylistSong(
+                        playlist: {
+                          'title': recommendedTitle,
+                          'list': data,
+                          'playbackKind': PlaybackSourceKind.home.name,
+                        },
+                        songIndex: index,
+                        context: PlaybackContext(
+                          kind: PlaybackSourceKind.home,
+                          title: recommendedTitle,
+                        ),
+                      );
+                    },
                   ),
                 );
               },

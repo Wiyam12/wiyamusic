@@ -33,6 +33,7 @@ import 'package:rxdart/rxdart.dart';
 import 'package:wiyamusic/constants/clients.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/models/equalizer_models.dart';
+import 'package:wiyamusic/models/playback_context.dart';
 import 'package:wiyamusic/models/position_data.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
@@ -99,12 +100,23 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   bool _isUpdatingState = false;
   bool _pendingPlaybackStateUpdate = false;
 
+  /// Origin of the active queue (liked songs, playlist, single song, …).
+  final ValueNotifier<PlaybackContext> playbackContextNotifier =
+      ValueNotifier<PlaybackContext>(PlaybackContext.singleSong());
+
+  /// Offline shuffle-cycle: ytids already played in the current fallback pass.
+  final Set<String> _offlineFallbackPlayedIds = <String>{};
+
   /// After stop/dismiss, ignore player events that would revive the session.
   bool _mediaSessionDismissed = false;
   int _songTransitionCounter = 0;
 
   bool _completionEventPending = false;
   bool _completionHandlerLoadStarted = false;
+  /// Guards against double-firing completion from both ProcessingState.completed
+  /// and the near-end position fallback used on iOS.
+  int _completionGeneration = 0;
+  DateTime? _lastNearEndCompletionAt;
 
   String? _lastError;
 
@@ -226,6 +238,18 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         _logStreamError('Processing state stream error', error, stackTrace);
       },
     );
+
+    // iOS/AVPlayer sometimes never emits ProcessingState.completed (or emits
+    // ready immediately after it). Watch position as a reliable fallback so
+    // queue auto-advance still works when a track reaches its end.
+    audioPlayer.positionStream
+        .throttleTime(const Duration(milliseconds: 400))
+        .listen(
+          _handleNearEndPosition,
+          onError: (error, stackTrace) {
+            _logStreamError('Position stream error', error, stackTrace);
+          },
+        );
 
     audioPlayer.durationStream.listen(
       (duration) {
@@ -857,53 +881,21 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   void _handleProcessingStateChange(ProcessingState state) {
     try {
       if (state == ProcessingState.completed) {
-        if (sleepTimerEndOfSong) {
-          sleepTimerExpired = true;
-          sleepTimerEndOfSong = false;
-          stop();
-          sleepTimerNotifier.value = null;
-          return;
-        }
-
-        listeningStatsService.finishListeningSession(
-          countCurrentTick: true,
-          wasPlaying: true,
-        );
-
-        if (!sleepTimerExpired && !_completionEventPending) {
-          _completionEventPending = true;
-
-          Future.microtask(() async {
-            try {
-              if (!sleepTimerExpired && _completionEventPending) {
-                await _handleSongCompletion();
-              }
-            } finally {
-              // Only reset if still marked as pending (another event didn't override)
-              if (_completionEventPending) {
-                _completionEventPending = false;
-                _completionHandlerLoadStarted = false;
-              }
-              // else {
-              //   logger.log(
-              //     '[COMPLETION] Flag already false in finally block (was overridden)',
-              //     null,
-              //     null,
-              //   );
-              // }
-            }
-          });
-        }
+        _requestSongCompletion();
       } else if (state == ProcessingState.ready) {
-        _completionEventPending = false;
-        _completionHandlerLoadStarted = false;
-
-        // Clear the expired flag so future song completions are not
-        // blocked after a sleep timer fired in a previous session.
-        // Do NOT touch sleepTimerEndOfSong here — 'ready' fires not
-        // only for new songs but also on buffering recovery within the
-        // same song, which would cancel an active "end of song" timer.
-        sleepTimerExpired = false;
+        // Do NOT clear _completionEventPending here. On iOS, AVPlayer can emit
+        // ready immediately after completed (or while the completion microtask
+        // is still queued). Clearing the flag would cancel skipToNext and the
+        // queue would stall at the ended track.
+        if (!_completionEventPending) {
+          _completionHandlerLoadStarted = false;
+          // Clear the expired flag so future song completions are not
+          // blocked after a sleep timer fired in a previous session.
+          // Do NOT touch sleepTimerEndOfSong here — 'ready' fires not
+          // only for new songs but also on buffering recovery within the
+          // same song, which would cancel an active "end of song" timer.
+          sleepTimerExpired = false;
+        }
       }
     } catch (e, stackTrace) {
       logger.log(
@@ -912,6 +904,92 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         stackTrace: stackTrace,
       );
     }
+  }
+
+  /// Fallback for platforms (notably iOS) that stall at end-of-track without
+  /// always emitting [ProcessingState.completed].
+  void _handleNearEndPosition(Duration position) {
+    try {
+      if (_completionEventPending || sleepTimerExpired) return;
+      if (_mediaSessionDismissed) return;
+      if (_currentLoadingIndex >= 0) return;
+
+      final playerDuration = audioPlayer.duration;
+      final known =
+          parseSongDuration(currentSong?['duration']) ??
+          mediaItem.valueOrNull?.duration;
+      final duration = resolveReportedDuration(known, playerDuration ?? Duration.zero);
+      if (duration <= Duration.zero) return;
+
+      // Only trigger when we're actually near the end of a playing (or just
+      // finished) track — not during seeks/scrubbing early in the song.
+      final remaining = duration - position;
+      if (remaining > const Duration(milliseconds: 600)) return;
+      if (position < duration * 0.85 &&
+          remaining > const Duration(milliseconds: 200)) {
+        return;
+      }
+
+      final now = DateTime.now();
+      if (_lastNearEndCompletionAt != null &&
+          now.difference(_lastNearEndCompletionAt!) <
+              const Duration(milliseconds: 1500)) {
+        return;
+      }
+
+      final state = audioPlayer.processingState;
+      final endedLikeState =
+          state == ProcessingState.completed ||
+          state == ProcessingState.ready ||
+          state == ProcessingState.idle;
+      if (!endedLikeState && audioPlayer.playing) {
+        // Still actively playing through the last few hundred ms — wait for
+        // either completed or playing to stop.
+        if (remaining > const Duration(milliseconds: 250)) return;
+      }
+
+      _lastNearEndCompletionAt = now;
+      _requestSongCompletion();
+    } catch (e, stackTrace) {
+      logger.log(
+        'Error handling near-end position',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  void _requestSongCompletion() {
+    if (sleepTimerEndOfSong) {
+      sleepTimerExpired = true;
+      sleepTimerEndOfSong = false;
+      stop();
+      sleepTimerNotifier.value = null;
+      return;
+    }
+
+    listeningStatsService.finishListeningSession(
+      countCurrentTick: true,
+      wasPlaying: true,
+    );
+
+    if (sleepTimerExpired || _completionEventPending) return;
+
+    _completionEventPending = true;
+    final generation = ++_completionGeneration;
+
+    Future.microtask(() async {
+      try {
+        if (sleepTimerExpired || generation != _completionGeneration) return;
+        if (!_completionEventPending) return;
+        await _handleSongCompletion();
+      } finally {
+        if (generation == _completionGeneration) {
+          _completionEventPending = false;
+          _completionHandlerLoadStarted = false;
+        }
+      }
+    });
   }
 
   void _handlePlaybackError({bool notifyUser = true}) {
@@ -952,8 +1030,9 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   }
 
   Future<bool> _backgroundAddSongsToQueue() async {
-    if (!await _shouldAllowOnlinePlaybackSideEffects() ||
-        !audioPlayer.playing) {
+    // Don't require audioPlayer.playing — on iOS (and after completion) the
+    // player is often already paused/stopped by the time this runs.
+    if (!await _shouldAllowOnlinePlaybackSideEffects()) {
       return false;
     }
 
@@ -968,7 +1047,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         },
       );
 
-      if (!audioPlayer.playing || nextRecommendedSong == null) return false;
+      if (nextRecommendedSong == null) return false;
 
       final songToAdd = nextRecommendedSong as Map;
       nextRecommendedSong = null;
@@ -1044,6 +1123,103 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       if (wrap && step == length) break;
     }
     return null;
+  }
+
+  Future<void> _applyPlaybackContext(
+    PlaybackContext context, {
+    required bool replacingQueue,
+  }) async {
+    playbackContextNotifier.value = context;
+
+    if (replacingQueue && !context.isOfflineFallback) {
+      _offlineFallbackPlayedIds.clear();
+    }
+
+    // Do not force Repeat All here — respect the user's current repeat
+    // preference. Starting a library playlist must not re-enable Repeat after
+    // the user has turned it off.
+  }
+
+  Future<List<Map>> _collectPlayableOfflineSongs() async {
+    final playable = <Map>[];
+    for (final song in userOfflineSongs.value.whereType<Map>()) {
+      if (await _canPlaySongWithoutNetwork(song)) {
+        playable.add(cloneMap(song));
+      }
+    }
+    return playable;
+  }
+
+  /// When offline and queue-repeat is off, build a shuffle cycle from downloaded
+  /// songs. Avoids replaying a song until every offline track has been played.
+  Future<bool> _startOfflineShuffleFallback() async {
+    try {
+      final playable = await _collectPlayableOfflineSongs();
+      if (playable.isEmpty) return false;
+
+      final currentId = currentSong?['ytid']?.toString();
+
+      if (playable.length == 1) {
+        final only = playable.first;
+        final onlyId = only['ytid']?.toString();
+        if (onlyId != null) _offlineFallbackPlayedIds.add(onlyId);
+        await addPlaylistToQueue(
+          [only],
+          replace: true,
+          startIndex: 0,
+          context: PlaybackContext.offlineFallback(),
+        );
+        return true;
+      }
+
+      var candidates = playable.where((song) {
+        final id = song['ytid']?.toString();
+        return id != null && !_offlineFallbackPlayedIds.contains(id);
+      }).toList();
+
+      if (candidates.isEmpty) {
+        _offlineFallbackPlayedIds.clear();
+        candidates = List<Map>.from(playable);
+      }
+
+      if (candidates.length > 1 && currentId != null) {
+        final withoutCurrent = candidates
+            .where((song) => song['ytid']?.toString() != currentId)
+            .toList();
+        if (withoutCurrent.isNotEmpty) {
+          candidates = withoutCurrent;
+        }
+      }
+
+      candidates.shuffle(_random);
+
+      for (final song in candidates) {
+        final id = song['ytid']?.toString();
+        if (id != null) _offlineFallbackPlayedIds.add(id);
+      }
+
+      await addPlaylistToQueue(
+        candidates,
+        replace: true,
+        startIndex: 0,
+        context: PlaybackContext.offlineFallback(),
+      );
+      return true;
+    } catch (e, stackTrace) {
+      logger.log(
+        'Error starting offline shuffle fallback',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return false;
+    }
+  }
+
+  void _clearPlaybackSessionState({bool clearContext = true}) {
+    _offlineFallbackPlayedIds.clear();
+    if (clearContext) {
+      playbackContextNotifier.value = PlaybackContext.singleSong();
+    }
   }
 
   /// Online preload / related-song fetches require real internet (and must not
@@ -1127,11 +1303,18 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       }
 
       final insertIndex = _queueList.length;
+      // iOS often leaves the player in ready/idle (not completed) after a
+      // track ends. Treat a non-playing end-of-queue state as eligible too.
+      final endedWithoutNext =
+          audioPlayer.processingState == ProcessingState.completed ||
+          ((audioPlayer.processingState == ProcessingState.ready ||
+                  audioPlayer.processingState == ProcessingState.idle) &&
+              !audioPlayer.playing);
       final shouldPlayInsertedSong =
           (playNextSongAutomatically.value || forcePlayAtEnd) &&
           !sleepTimerExpired &&
           _currentLoadingIndex == -1 &&
-          audioPlayer.processingState == ProcessingState.completed &&
+          endedWithoutNext &&
           _queueList.isNotEmpty &&
           _currentQueueIndex == _queueList.length - 1;
       final queueSong = _queueEntryIds.createSong(song);
@@ -1359,6 +1542,8 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     List<Map> songs, {
     bool replace = false,
     int? startIndex,
+    PlaybackContext? context,
+    bool enableShuffle = false,
   }) async {
     try {
       final manuallyAddedSongs = replace ? _getUnplayedManualSongs() : <Map>[];
@@ -1376,9 +1561,28 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         _currentLoadingTransitionId = -1;
         _setPlayRequestPending(false);
         _resetPreloadingState();
-        shuffleNotifier.value = false;
-        unawaited(Hive.box('settings').put('shuffleEnabled', false));
-        await audioPlayer.setShuffleModeEnabled(false);
+
+        final resolvedContext =
+            context ??
+            (songs.length <= 1
+                ? PlaybackContext.singleSong(
+                    id: songs.isNotEmpty ? songs.first['ytid']?.toString() : null,
+                    title: songs.isNotEmpty
+                        ? songs.first['title']?.toString()
+                        : null,
+                  )
+                : const PlaybackContext(kind: PlaybackSourceKind.other));
+        await _applyPlaybackContext(resolvedContext, replacingQueue: true);
+
+        if (enableShuffle) {
+          shuffleNotifier.value = true;
+          unawaited(Hive.box('settings').put('shuffleEnabled', true));
+          await audioPlayer.setShuffleModeEnabled(true);
+        } else {
+          shuffleNotifier.value = false;
+          unawaited(Hive.box('settings').put('shuffleEnabled', false));
+          await audioPlayer.setShuffleModeEnabled(false);
+        }
       }
 
       int? targetQueueIndex;
@@ -1401,6 +1605,16 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
             ? _queueList.length
             : insertIndex;
         _queueList.insertAll(safeInsertIndex, manuallyAddedSongs);
+      }
+
+      if (replace && enableShuffle && _queueList.length > 1) {
+        final startIndexForShuffle = targetQueueIndex ?? 0;
+        if (startIndexForShuffle >= 0 &&
+            startIndexForShuffle < _queueList.length) {
+          _currentQueueIndex = startIndexForShuffle;
+        }
+        _enableShuffle(const [], {});
+        targetQueueIndex = 0;
       }
 
       _hydrateQueueEntryIds();
@@ -1567,6 +1781,12 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       if (currentSong != null) {
         _queueList.add(currentSong);
         _originalQueueList.add(cloneMap(currentSong));
+        playbackContextNotifier.value = PlaybackContext.singleSong(
+          id: currentSong['ytid']?.toString(),
+          title: currentSong['title']?.toString(),
+        );
+      } else {
+        _clearPlaybackSessionState();
       }
 
       _currentQueueIndex = 0;
@@ -1680,6 +1900,9 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     _currentLoadingIndex = index;
     _currentLoadingTransitionId = currentTransitionId;
     _setPlayRequestPending(true);
+    // Avoid an immediate near-end re-trigger against the previous track's
+    // duration while the next source is still loading.
+    _lastNearEndCompletionAt = DateTime.now();
 
     try {
       final previousQueueIndex = _currentQueueIndex;
@@ -1710,11 +1933,13 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         if (success) {
           if (await _shouldAllowOnlinePlaybackSideEffects()) {
             _preloadUpcomingSongs();
-            if (_currentQueueIndex == _queueList.length - 1) {
-              unawaited(_prepareGenreFallback());
-            }
-            // Trigger background song addition if auto-play is enabled
-            if (playNextSongAutomatically.value) {
+            // When Repeat All (or Repeat One) is active the queue must loop over
+            // exactly the current playlist, so never prepare/append auto-picked
+            // songs — that is reserved for the "auto picker, no repeat" mode.
+            if (_isAutoPickerActive) {
+              if (_currentQueueIndex == _queueList.length - 1) {
+                unawaited(_prepareGenreFallback());
+              }
               unawaited(_backgroundAddSongsToQueue());
             }
           }
@@ -1832,6 +2057,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 
   Stream<List<Map>> get queueAsMapStream => _queueMapStream.stream;
   int get currentQueueIndex => _currentQueueIndex;
+  PlaybackContext get playbackContext => playbackContextNotifier.value;
   Map? get currentSong =>
       _currentQueueIndex >= 0 && _currentQueueIndex < _queueList.length
       ? _queueList[_currentQueueIndex]
@@ -2201,6 +2427,7 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     _currentLoadingIndex = -1;
     _currentLoadingTransitionId = -1;
     _resetPreloadingState();
+    _clearPlaybackSessionState();
     queue.add([]);
     _queueMapStream.add(const []);
     mediaItem.add(null);
@@ -2245,6 +2472,60 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 
   /// Stops playback and clears the current media so the mini player hides.
   Future<void> dismissPlayer() => stop();
+
+  /// Auto picker only generates/appends recommended songs when Repeat is off.
+  /// Under Repeat All/One the queue must loop over exactly the current playlist.
+  bool get _isAutoPickerActive =>
+      playNextSongAutomatically.value &&
+      repeatNotifier.value == AudioServiceRepeatMode.none;
+
+  /// Removes recommended (auto-picked) songs so the queue holds only the
+  /// original playlist. The currently playing track is preserved even if it
+  /// was auto-picked, so enabling Repeat All never interrupts playback.
+  void _removeAutoPickedSongs() {
+    if (_queueList.isEmpty) return;
+
+    final currentId = _currentQueueIndex >= 0 &&
+            _currentQueueIndex < _queueList.length
+        ? _queueEntryIds.ensureId(_queueList[_currentQueueIndex])
+        : null;
+
+    var removed = false;
+    final retained = <Map>[];
+    for (final song in _queueList) {
+      final isCurrent =
+          currentId != null && _queueEntryIds.ensureId(song) == currentId;
+      if (song['isAutoPicked'] == true && !isCurrent) {
+        removed = true;
+        continue;
+      }
+      retained.add(song);
+    }
+
+    if (!removed) return;
+
+    _queueList
+      ..clear()
+      ..addAll(retained);
+
+    if (currentId != null) {
+      final newIndex = _queueList.indexWhere(
+        (song) => _queueEntryIds.ensureId(song) == currentId,
+      );
+      _currentQueueIndex = newIndex == -1 ? 0 : newIndex;
+    } else if (_currentQueueIndex >= _queueList.length) {
+      _currentQueueIndex = _queueList.isEmpty ? 0 : _queueList.length - 1;
+    }
+
+    // Auto-picked songs also feed the pre-shuffle snapshot; drop them there too.
+    if (_originalQueueList.isNotEmpty) {
+      _originalQueueList.removeWhere((song) => song['isAutoPicked'] == true);
+    }
+
+    _preparedGenreFallback = null;
+    _preparedGenreFallbackSeedId = null;
+    _updateQueueMediaItems();
+  }
 
   /// Returns unplayed manually added songs after the current queue index.
   List<Map> _getUnplayedManualSongs() {
@@ -2719,6 +3000,8 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
   Future<void> playPlaylistSong({
     Map<dynamic, dynamic>? playlist,
     required int songIndex,
+    PlaybackContext? context,
+    bool enableShuffle = false,
   }) async {
     try {
       if (playlist != null && playlist['list'] != null) {
@@ -2729,7 +3012,19 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
           }
           return <dynamic, dynamic>{...song, 'genre': genre};
         }).toList();
-        await addPlaylistToQueue(songs, replace: true, startIndex: songIndex);
+
+        final resolved = PlaybackContext.resolve(
+          playlist: Map<dynamic, dynamic>.from(playlist),
+          explicit: context,
+        );
+
+        await addPlaylistToQueue(
+          songs,
+          replace: true,
+          startIndex: songIndex,
+          context: resolved,
+          enableShuffle: enableShuffle,
+        );
       }
     } catch (e, stackTrace) {
       logger.log('Error playing playlist', error: e, stackTrace: stackTrace);
@@ -2773,6 +3068,16 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         );
         await audioPlayer.pause();
       }
+
+      await _applyPlaybackContext(
+        PlaybackContext.radio(id: id, title: name),
+        replacingQueue: true,
+      );
+      _queueList
+        ..clear()
+        ..add(_queueEntryIds.createSong(radioSong));
+      _originalQueueList.clear();
+      _currentQueueIndex = 0;
 
       // Update media item and queue for mini player visibility
       final mediaItem = mapToMediaItem(radioSong);
@@ -2966,6 +3271,12 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
         );
         if (nextOffline != null) {
           await _playFromQueue(nextOffline);
+        } else if (!wrap) {
+          // No internet + queue repeat disabled → seamless offline shuffle cycle.
+          final started = await _startOfflineShuffleFallback();
+          if (!started) {
+            logger.log('No offline songs available to play next');
+          }
         } else {
           logger.log('No offline songs available to play next');
         }
@@ -2976,18 +3287,23 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       if (_currentQueueIndex < _queueList.length - 1) {
         await _playFromQueue(_currentQueueIndex + 1);
       } else if (wrap && _queueList.isNotEmpty) {
+        // Repeat All: loop back to the first song of the current playlist.
+        // Never append recommended songs here.
         await _playFromQueue(0);
-      } else if (playNextSongAutomatically.value &&
-          _currentLoadingIndex == -1) {
-        // Preserve the existing related-song autoplay first. If it cannot
-        // provide a song, continue with the prepared same-genre fallback.
+      } else if (_isAutoPickerActive && _currentLoadingIndex == -1) {
+        // Auto picker (no repeat): append a recommended/related song. If that
+        // fails, fall back to a same-genre pick.
         final addedRelatedSong = await _backgroundAddSongsToQueue();
         if (!addedRelatedSong) {
           await _playGenreFallbackAtQueueEnd();
+        } else if (_currentQueueIndex < _queueList.length - 1 &&
+            !audioPlayer.playing) {
+          // Related song was queued but not started (common on iOS when
+          // ProcessingState.completed never sticks). Advance into it.
+          await _playFromQueue(_currentQueueIndex + 1);
         }
-      } else if (_currentLoadingIndex == -1) {
-        await _playGenreFallbackAtQueueEnd();
       }
+      // Auto picker OFF + Repeat OFF: stop at the end of the queue.
 
       _cleanupOldPreloadedSongs();
     } catch (e, stackTrace) {
@@ -3036,6 +3352,10 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
 
       if (_currentQueueIndex > 0) {
         await _playFromQueue(_currentQueueIndex - 1);
+      } else if (repeatNotifier.value == AudioServiceRepeatMode.all &&
+          _queueList.isNotEmpty) {
+        // Stay inside the collection: wrap to the last track.
+        await _playFromQueue(_queueList.length - 1);
       } else if (_historyList.isNotEmpty) {
         final lastSong = cloneMap(_historyList.removeLast());
         _queueList.insert(0, lastSong);
@@ -3185,6 +3505,13 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     try {
       repeatNotifier.value = repeatMode;
       unawaited(Hive.box('settings').put('repeatMode', repeatMode.index));
+
+      // Repeat All must loop over only the current playlist. Strip any
+      // recommended songs that the auto picker previously appended so no
+      // orphaned/duplicate tracks remain when switching modes.
+      if (repeatMode == AudioServiceRepeatMode.all) {
+        _removeAutoPickedSongs();
+      }
 
       // Always set loop mode to off - we handle all repeating through _handleSongCompletion
       // This ensures ProcessingState.completed is always fired for proper song transitions

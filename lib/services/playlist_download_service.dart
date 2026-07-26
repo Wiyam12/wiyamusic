@@ -31,6 +31,7 @@ import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
+import 'package:wiyamusic/services/download_notification_service.dart';
 import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
@@ -133,6 +134,19 @@ class OfflinePlaylistService {
       ..value = DownloadProgress(total: songsList.length);
     activeDownloads.add(playlistId);
 
+    final playlistTitle =
+        playlist['title']?.toString().trim().isNotEmpty == true
+        ? playlist['title'].toString().trim()
+        : 'Playlist';
+
+    unawaited(
+      downloadNotificationService.startPlaylistDownload(
+        playlistId: playlistId,
+        playlistTitle: playlistTitle,
+        total: songsList.length,
+      ),
+    );
+
     try {
       final songQueue = Queue<dynamic>.from(songsList);
       // Keep playlist song downloads sequential to avoid YouTube rate limits.
@@ -143,7 +157,12 @@ class OfflinePlaylistService {
 
       await Future.wait([
         for (var i = 0; i < workerCount; i++)
-          _processDownloadQueue(songQueue, progressNotifier),
+          _processDownloadQueue(
+            songQueue,
+            progressNotifier,
+            playlistId: playlistId,
+            playlistTitle: playlistTitle,
+          ),
       ]).timeout(
         Duration(minutes: songsList.length * 2),
         onTimeout: () {
@@ -168,6 +187,16 @@ class OfflinePlaylistService {
         stackTrace: stackTrace,
       );
       activeDownloads.remove(playlistId);
+      unawaited(
+        downloadNotificationService.finishPlaylistDownload(
+          playlistId: playlistId,
+          playlistTitle: playlistTitle,
+          completed: progressNotifier.value.completed,
+          failed: progressNotifier.value.failed,
+          total: progressNotifier.value.total,
+          cancelled: true,
+        ),
+      );
       cleanupProgressNotifier(playlistId);
       if (context.mounted) {
         showToast(context, '${context.l10n!.error}: $e');
@@ -276,6 +305,21 @@ class OfflinePlaylistService {
 
       // Clean up the progress notifier now that the download is fully done.
       cleanupProgressNotifier(playlistId);
+
+      final playlistTitle =
+          playlist['title']?.toString().trim().isNotEmpty == true
+          ? playlist['title'].toString().trim()
+          : 'Playlist';
+      unawaited(
+        downloadNotificationService.finishPlaylistDownload(
+          playlistId: playlistId,
+          playlistTitle: playlistTitle,
+          completed: progressNotifier.value.completed,
+          failed: progressNotifier.value.failed,
+          total: progressNotifier.value.total,
+          cancelled: progressNotifier.value.isCancelled,
+        ),
+      );
     } catch (e, stackTrace) {
       logger.log(
         'Error handling download completion',
@@ -489,8 +533,10 @@ class OfflinePlaylistService {
 
   Future<void> _processDownloadQueue(
     Queue<dynamic> songQueue,
-    ValueNotifier<DownloadProgress> progressNotifier,
-  ) async {
+    ValueNotifier<DownloadProgress> progressNotifier, {
+    required String playlistId,
+    required String playlistTitle,
+  }) async {
     while (songQueue.isNotEmpty && !progressNotifier.value.isCancelled) {
       final song = songQueue.removeFirst();
 
@@ -501,8 +547,15 @@ class OfflinePlaylistService {
           logger.log('Invalid song data in playlist download');
           progressNotifier.value.failed++;
           progressNotifier.notifyListeners();
+          _notifyPlaylistProgress(
+            playlistId: playlistId,
+            playlistTitle: playlistTitle,
+            progress: progressNotifier.value,
+          );
           continue;
         }
+
+        final songTitle = song['title']?.toString() ?? 'Song';
 
         // Skip if already offline
         if (isSongAlreadyOffline(song['ytid'])) {
@@ -516,11 +569,28 @@ class OfflinePlaylistService {
           // Update progress
           progressNotifier.value.completed++;
           progressNotifier.notifyListeners();
+          _notifyPlaylistProgress(
+            playlistId: playlistId,
+            playlistTitle: playlistTitle,
+            progress: progressNotifier.value,
+            currentSongTitle: songTitle,
+            currentSongProgress: 1,
+          );
         } else {
           try {
             final success = await makeSongOffline(
               song,
               cancelExisting: false,
+              showNotification: false,
+              onProgress: (songProgress) {
+                _notifyPlaylistProgress(
+                  playlistId: playlistId,
+                  playlistTitle: playlistTitle,
+                  progress: progressNotifier.value,
+                  currentSongTitle: songTitle,
+                  currentSongProgress: songProgress,
+                );
+              },
             );
             if (success) {
               progressNotifier.value.completed++;
@@ -533,6 +603,11 @@ class OfflinePlaylistService {
             await Future<void>.delayed(const Duration(seconds: 8));
           }
           progressNotifier.notifyListeners();
+          _notifyPlaylistProgress(
+            playlistId: playlistId,
+            playlistTitle: playlistTitle,
+            progress: progressNotifier.value,
+          );
           // Brief pause between songs to reduce YouTube rate limiting.
           await Future<void>.delayed(const Duration(milliseconds: 400));
         }
@@ -544,8 +619,33 @@ class OfflinePlaylistService {
         );
         progressNotifier.value.failed++;
         progressNotifier.notifyListeners();
+        _notifyPlaylistProgress(
+          playlistId: playlistId,
+          playlistTitle: playlistTitle,
+          progress: progressNotifier.value,
+        );
       }
     }
+  }
+
+  void _notifyPlaylistProgress({
+    required String playlistId,
+    required String playlistTitle,
+    required DownloadProgress progress,
+    String? currentSongTitle,
+    double? currentSongProgress,
+  }) {
+    unawaited(
+      downloadNotificationService.updatePlaylistDownload(
+        playlistId: playlistId,
+        playlistTitle: playlistTitle,
+        completed: progress.completed,
+        failed: progress.failed,
+        total: progress.total,
+        currentSongTitle: currentSongTitle,
+        currentSongProgress: currentSongProgress,
+      ),
+    );
   }
 }
 

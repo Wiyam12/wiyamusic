@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart' show audioHandler, logger;
+import 'package:wiyamusic/models/playback_context.dart';
 import 'package:wiyamusic/services/artist_service.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/playlist_download_service.dart';
@@ -267,6 +268,14 @@ class _LibraryPageState extends State<LibraryPage> {
                     : () => NavigationManager.router.go(
                         '/library/userSongs/recents',
                       ),
+                playbackContext: PlaybackContext(
+                  kind: PlaybackSourceKind.recentlyPlayed,
+                  title: context.l10n!.recentlyPlayed,
+                ),
+                playQueue: userRecentlyPlayed.value
+                    .whereType<Map>()
+                    .map((s) => Map<String, dynamic>.from(s))
+                    .toList(),
               ),
               _OverviewSongRail(
                 title: context.l10n!.likedSongs,
@@ -284,6 +293,14 @@ class _LibraryPageState extends State<LibraryPage> {
                     : () => NavigationManager.router.go(
                         '/library/userSongs/liked',
                       ),
+                playbackContext: PlaybackContext(
+                  kind: PlaybackSourceKind.likedSongs,
+                  title: context.l10n!.likedSongs,
+                ),
+                playQueue: userLikedSongsList.value
+                    .whereType<Map>()
+                    .map((s) => Map<String, dynamic>.from(s))
+                    .toList(),
               ),
               _OverviewPlaylistRail(
                 title: context.l10n!.likedPlaylists,
@@ -1219,6 +1236,8 @@ class _OverviewSongRail extends StatelessWidget {
     this.emptyActionLabel,
     this.onEmptyAction,
     this.onSeeAll,
+    this.playbackContext,
+    this.playQueue,
   });
 
   final String title;
@@ -1230,6 +1249,42 @@ class _OverviewSongRail extends StatelessWidget {
   final String? emptyActionLabel;
   final VoidCallback? onEmptyAction;
   final VoidCallback? onSeeAll;
+  final PlaybackContext? playbackContext;
+  final List<Map<String, dynamic>>? playQueue;
+
+  void _playAt(int index) {
+    final queue = playQueue ?? songs;
+    if (queue.isEmpty) return;
+
+    final song = songs[index];
+    final ytid = song['ytid']?.toString();
+    final queueIndex = ytid == null
+        ? -1
+        : queue.indexWhere((s) => s['ytid']?.toString() == ytid);
+    final source =
+        playbackContext ??
+        PlaybackContext.singleSong(
+          id: ytid,
+          title: song['title']?.toString(),
+        );
+
+    if (source.isLibraryCollection || queue.length > 1) {
+      audioHandler.playPlaylistSong(
+        playlist: {
+          'ytid': '',
+          'title': title,
+          'source': 'user-created',
+          'playbackKind': source.kind.name,
+          'list': queue,
+        },
+        songIndex: queueIndex != -1 ? queueIndex : index,
+        context: source,
+      );
+      return;
+    }
+
+    audioHandler.playSong(song);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1263,8 +1318,8 @@ class _OverviewSongRail extends StatelessWidget {
                   title: song['title']?.toString() ?? '',
                   subtitle: song['artist']?.toString(),
                   imageUrl: _librarySongImage(song),
-                  onTap: () => audioHandler.playSong(song),
-                  onPlay: () => audioHandler.playSong(song),
+                  onTap: () => _playAt(index),
+                  onPlay: () => _playAt(index),
                 );
               },
             ),

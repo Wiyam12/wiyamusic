@@ -21,6 +21,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -288,34 +289,53 @@ Future<void> _restoreBoxesFromJson(Map<String, dynamic> boxesJson) async {
 Future<({String message, bool success})> backupData(
   BuildContext context,
 ) async {
-  final dlPath = await FilePicker.getDirectoryPath();
-
-  if (dlPath == null) {
-    return (message: '${context.l10n!.chooseBackupDir}!', success: false);
-  }
-
-  // Android scoped storage: writing outside Downloads/Documents often fails.
-  // Skip this check on iOS/macOS/desktop where the user can pick any folder.
-  if (Platform.isAndroid) {
-    final normalized = dlPath.toLowerCase();
-    final isAllowedFolder =
-        normalized.contains('document') || normalized.contains('download');
-    if (!isAllowedFolder) {
-      return (message: context.l10n!.folderRestrictions, success: false);
-    }
-  }
-
   try {
     final payload = await _buildBackupPayload();
     final stamp = DateTime.now()
         .toIso8601String()
         .replaceAll(':', '-')
         .replaceAll('.', '-');
-    final targetFile = File('$dlPath/wiyamusic_backup_$stamp.json');
-    await targetFile.parent.create(recursive: true);
-    await targetFile.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(payload),
+    final fileName = 'wiyamusic_backup_$stamp.json';
+    final jsonBytes = Uint8List.fromList(
+      utf8.encode(const JsonEncoder.withIndent('  ').convert(payload)),
     );
+
+    // On iOS, getDirectoryPath() returns a File Provider location that dart:io
+    // cannot write to (PathAccessException / EPERM). saveFile with bytes uses
+    // the system document picker and writes with the proper entitlements.
+    // Android also requires bytes for saveFile in file_picker 11+.
+    if (Platform.isIOS || Platform.isAndroid) {
+      final savedPath = await FilePicker.saveFile(
+        dialogTitle: context.l10n!.chooseBackupDir,
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        bytes: jsonBytes,
+      );
+
+      if (savedPath == null) {
+        return (message: '${context.l10n!.chooseBackupDir}!', success: false);
+      }
+
+      return (message: '${context.l10n!.backedupSuccess}!', success: true);
+    }
+
+    // Desktop: pick a destination path, then write the bytes ourselves.
+    final savedPath = await FilePicker.saveFile(
+      dialogTitle: context.l10n!.chooseBackupDir,
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      bytes: jsonBytes,
+    );
+
+    if (savedPath == null) {
+      return (message: '${context.l10n!.chooseBackupDir}!', success: false);
+    }
+
+    final targetFile = File(savedPath);
+    await targetFile.parent.create(recursive: true);
+    await targetFile.writeAsBytes(jsonBytes, flush: true);
 
     return (message: '${context.l10n!.backedupSuccess}!', success: true);
   } catch (e, stackTrace) {

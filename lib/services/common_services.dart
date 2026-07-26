@@ -30,6 +30,7 @@ import 'package:wiyamusic/constants/clients.dart';
 import 'package:wiyamusic/main.dart' show logger;
 import 'package:wiyamusic/models/song_lyrics.dart';
 import 'package:wiyamusic/services/data_manager.dart';
+import 'package:wiyamusic/services/download_notification_service.dart';
 import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/lyrics_manager.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
@@ -1117,9 +1118,17 @@ Future<bool> makeSongOffline(
   dynamic song, {
   void Function(double progress)? onProgress,
   bool cancelExisting = true,
+  bool showNotification = true,
 }) async {
   String? ytid;
   _SongDownloadSession? session;
+  int? notificationId;
+  var cancelled = false;
+  var success = false;
+  final songTitle = song is Map
+      ? (song['title']?.toString() ?? 'Song')
+      : 'Song';
+
   try {
     ytid = song['ytid']?.toString();
 
@@ -1163,6 +1172,12 @@ Future<bool> makeSongOffline(
     _setSongDownloadProgress(ytid, 0);
     onProgress?.call(0);
 
+    if (showNotification) {
+      notificationId = await downloadNotificationService.startSongDownload(
+        songTitle: songTitle,
+      );
+    }
+
     final offlineSong = Map<String, dynamic>.from(song as Map);
 
     final audioPath = FilePaths.getAudioPath(ytid);
@@ -1172,6 +1187,7 @@ Future<bool> makeSongOffline(
     await audioFile.parent.create(recursive: true);
 
     IOSink? fileStream;
+    DateTime? lastNotifUpdate;
     try {
       if (session.cancelled) throw SongOfflineDownloadCancelled();
 
@@ -1192,6 +1208,22 @@ Future<bool> makeSongOffline(
                 .clamp(0.0, 0.95);
         _setSongDownloadProgress(ytid!, progress);
         onProgress?.call(progress);
+
+        if (notificationId != null) {
+          final now = DateTime.now();
+          if (lastNotifUpdate == null ||
+              now.difference(lastNotifUpdate!) >
+                  const Duration(milliseconds: 400)) {
+            lastNotifUpdate = now;
+            unawaited(
+              downloadNotificationService.updateSongDownload(
+                notificationId: notificationId,
+                songTitle: songTitle,
+                progress: progress,
+              ),
+            );
+          }
+        }
       }
 
       final stream = ytClient.videos.streamsClient.get(audioManifest);
@@ -1208,6 +1240,7 @@ Future<bool> makeSongOffline(
       _setSongDownloadProgress(ytid, 1);
       onProgress?.call(1);
     } on SongOfflineDownloadCancelled {
+      cancelled = true;
       try {
         await fileStream?.close();
       } catch (_) {}
@@ -1245,6 +1278,7 @@ Future<bool> makeSongOffline(
     }
 
     if (session.cancelled) {
+      cancelled = true;
       if (await audioFile.exists()) {
         await audioFile.delete();
       }
@@ -1314,6 +1348,7 @@ Future<bool> makeSongOffline(
 
     unawaited(cacheLyricsForOfflineSong(offlineSong));
 
+    success = true;
     return true;
   } on SongOfflineRateLimited {
     rethrow;
@@ -1321,6 +1356,16 @@ Future<bool> makeSongOffline(
     logger.log('Error making song offline', error: e, stackTrace: stackTrace);
     return false;
   } finally {
+    if (notificationId != null) {
+      unawaited(
+        downloadNotificationService.finishSongDownload(
+          notificationId: notificationId,
+          songTitle: songTitle,
+          success: success,
+          cancelled: cancelled,
+        ),
+      );
+    }
     if (ytid != null &&
         ytid.isNotEmpty &&
         identical(_songDownloadSessions[ytid], session)) {

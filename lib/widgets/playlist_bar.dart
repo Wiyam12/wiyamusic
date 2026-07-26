@@ -27,13 +27,11 @@ import 'package:go_router/go_router.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/services/artist_service.dart';
 import 'package:wiyamusic/services/common_services.dart';
-import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/utilities/artwork_provider.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/offline_playlist_dialogs.dart';
-import 'package:wiyamusic/utilities/playlist_dialogs.dart';
 import 'package:wiyamusic/utilities/playlist_utils.dart';
 import 'package:wiyamusic/widgets/dialog_item.dart';
 import 'package:wiyamusic/widgets/edit_playlist_dialog.dart';
@@ -90,6 +88,28 @@ class PlaylistBar extends StatelessWidget {
       playlistId ?? playlistData?['ytid']?.toString();
 
   bool get _canAddToPlaylist => !isFolder && _resolvedPlaylistId != null;
+
+  /// Builds the metadata handed to the like service so the item is stored in
+  /// the correct bucket (albums vs playlists). Search results have no
+  /// [playlistData], so without this an album would resolve as a plain
+  /// playlist and land in Liked Playlists instead of Liked Albums.
+  Map<String, dynamic> _likePayload() {
+    final payload = <String, dynamic>{};
+    final data = playlistData;
+    if (data != null) {
+      payload.addAll(
+        data.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    }
+    payload['ytid'] = _resolvedPlaylistId;
+    payload['title'] ??= playlistTitle;
+    if (playlistArtwork != null && payload['image'] == null) {
+      payload['image'] = playlistArtwork;
+    }
+    if (isAlbum == true) payload['isAlbum'] = true;
+    if (isArtist) payload['isArtist'] = true;
+    return payload;
+  }
 
   /// Label for the like action, matching the kind of item this bar represents.
   String _likeActionLabel(BuildContext context, {required bool isLiked}) {
@@ -195,10 +215,9 @@ class PlaylistBar extends StatelessWidget {
                             _resolvedPlaylistId,
                           );
                           unawaited(
-                            updatePlaylistLikeStatus(
-                              _resolvedPlaylistId!,
-                              !isLiked,
-                              playlistData: playlistData,
+                            _handleLikeAction(
+                              context,
+                              isLiked: isLiked,
                             ),
                           );
                         }
@@ -623,6 +642,25 @@ class PlaylistBar extends StatelessWidget {
     return NavigationManager.homePath;
   }
 
+  Future<void> _handleLikeAction(
+    BuildContext context, {
+    required bool isLiked,
+  }) async {
+    final playlistId = _resolvedPlaylistId;
+    if (playlistId == null || playlistId.isEmpty) return;
+
+    final shouldAdd = !isLiked;
+    await updatePlaylistLikeStatus(
+      playlistId,
+      shouldAdd,
+      playlistData: _likePayload(),
+    );
+
+    if (shouldAdd && context.mounted) {
+      showToast(context, context.l10n!.addedSuccess);
+    }
+  }
+
   Future<void> _handleAddPlaylistToPlaylist(BuildContext context) async {
     if (_resolvedPlaylistId == null) {
       showToast(context, context.l10n!.error);
@@ -630,6 +668,13 @@ class PlaylistBar extends StatelessWidget {
     }
 
     final navContext = NavigationManager().context;
+    var isLoadingVisible = true;
+    void dismissLoading() {
+      if (!isLoadingVisible || !navContext.mounted) return;
+      isLoadingVisible = false;
+      Navigator.pop(navContext);
+    }
+
     unawaited(
       showDialog(
         context: navContext,
@@ -648,7 +693,7 @@ class PlaylistBar extends StatelessWidget {
             isArtist && playlistData?['isVerifiedArtist'] == true,
       );
       if (!navContext.mounted) return;
-      Navigator.pop(navContext);
+      dismissLoading();
 
       if (fullPlaylist == null || fullPlaylist['list'] == null) {
         showToast(navContext, navContext.l10n!.error);
@@ -661,10 +706,50 @@ class PlaylistBar extends StatelessWidget {
         return;
       }
 
-      showAddToPlaylistDialog(navContext, songs: tracks);
+      final rawTitle = fullPlaylist['title']?.toString() ?? playlistTitle;
+      final title = isArtist
+          ? normalizeArtistDisplayTitle(rawTitle)
+          : rawTitle.trim();
+      if (title.isEmpty) {
+        showToast(navContext, navContext.l10n!.error);
+        return;
+      }
+
+      final rawImage =
+          fullPlaylist['image']?.toString() ?? playlistArtwork;
+      final image = isArtist
+          ? normalizeArtistThumbnailUrl(rawImage)
+          : rawImage;
+
+      final matching = getUserCustomPlaylists().where((playlist) {
+        final existingTitle = playlist['title']
+            ?.toString()
+            .trim()
+            .toLowerCase();
+        return existingTitle == title.toLowerCase();
+      }).toList();
+
+      if (matching.isNotEmpty) {
+        final existingId = matching.first['ytid']?.toString();
+        if (existingId == null || existingId.isEmpty) {
+          showToast(navContext, navContext.l10n!.error);
+          return;
+        }
+        showToast(
+          navContext,
+          addSongsInCustomPlaylist(navContext, existingId, tracks),
+        );
+        return;
+      }
+
+      final (_, newPlaylistId) = createCustomPlaylist(title, image, navContext);
+      showToast(
+        navContext,
+        addSongsInCustomPlaylist(navContext, newPlaylistId, tracks),
+      );
     } catch (e) {
+      dismissLoading();
       if (navContext.mounted) {
-        Navigator.pop(navContext);
         showToast(navContext, navContext.l10n!.error);
       }
     }
@@ -673,31 +758,22 @@ class PlaylistBar extends StatelessWidget {
   Future<void> _handleEdit(BuildContext context) async {
     if (playlistData == null) return;
 
-    final result = await showDialog<Map?>(
-      context: context,
-      builder: (context) => EditPlaylistDialog(playlistData: playlistData!),
+    final result = await showEditPlaylistSheet(
+      context,
+      playlistData: playlistData!,
     );
 
-    if (result != null) {
-      final index = userCustomPlaylists.value.indexOf(playlistData!);
-      if (index != -1) {
-        final updatedPlaylists = List<Map>.from(userCustomPlaylists.value);
-        updatedPlaylists[index] = result;
-        userCustomPlaylists.value = updatedPlaylists;
-        unawaited(
-          addOrUpdateData<List<Map>>(
-            'user',
-            'customPlaylists',
-            userCustomPlaylists.value,
-          ),
-        );
+    if (result == null) return;
 
-        // Update offline playlist if it exists
-        unawaited(syncOfflinePlaylistMetadata(result));
+    // Route through the manager so playlists living inside a folder are also
+    // updated. The old `indexOf` lookup only matched top-level custom
+    // playlists, so folder playlists silently dropped their edits (image
+    // never updated).
+    final updated = await updateUserPlaylistMetadata(result);
 
-        final appCtx = NavigationManager().context;
-        showToast(appCtx, appCtx.l10n!.playlistUpdated);
-      }
+    if (updated) {
+      final appCtx = NavigationManager().context;
+      showToast(appCtx, appCtx.l10n!.playlistUpdated);
     }
   }
 

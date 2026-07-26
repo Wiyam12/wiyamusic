@@ -57,7 +57,12 @@ class WiyaAnimatedIcon extends StatelessWidget {
     // decorative (nav icons, spinners, playing indicators), ignore those
     // gestures so parent taps still work.
     if (onTap == null) {
-      return IgnorePointer(child: animated);
+      // AnimateIcon builds an InkWell, which asserts on a missing Material
+      // ancestor. Decorative usages such as spinners can render outside one
+      // (bare dialogs, image placeholders), so supply a transparent Material.
+      return IgnorePointer(
+        child: Material(type: MaterialType.transparency, child: animated),
+      );
     }
     return animated;
   }

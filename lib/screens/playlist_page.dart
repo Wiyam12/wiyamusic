@@ -25,6 +25,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/models/playback_context.dart';
 import 'package:wiyamusic/services/artist_service.dart';
 import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
@@ -112,6 +113,24 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   bool get _isArtistCatalogFailed =>
       widget.isArtist && _playlist?['catalogStatus'] == 'failed';
+
+  PlaybackContext _playbackContextForPlaylist() {
+    final playlist = _playlist;
+    if (playlist is! Map) {
+      return PlaybackContext.singleSong();
+    }
+    return PlaybackContext.resolve(
+      playlist: {
+        ...playlist,
+        if (widget.isArtist) 'isArtist': true,
+        'playbackKind': widget.isArtist
+            ? PlaybackSourceKind.artist.name
+            : playlist['isAlbum'] == true
+            ? PlaybackSourceKind.album.name
+            : PlaybackSourceKind.playlist.name,
+      },
+    );
+  }
 
   @override
   void initState() {
@@ -604,26 +623,18 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final playlist = _playlist;
     if (playlist is! Map) return;
 
-    final updated = await showDialog<Map?>(
-      context: context,
-      builder: (_) => EditPlaylistDialog(playlistData: playlist),
+    final updated = await showEditPlaylistSheet(
+      context,
+      playlistData: playlist,
     );
     if (updated == null || !mounted) return;
 
-    final playlistId = updated['ytid']?.toString();
-    final playlists = List<Map>.from(userCustomPlaylists.value);
-    final index = playlists.indexWhere(
-      (item) => item['ytid']?.toString() == playlistId,
-    );
-    if (index == -1) {
-      showToast(context, context.l10n!.error);
+    final saved = await updateUserPlaylistMetadata(updated);
+    if (!saved) {
+      if (mounted) showToast(context, context.l10n!.error);
       return;
     }
-
-    playlists[index] = updated;
-    userCustomPlaylists.value = playlists;
-    unawaited(addOrUpdateData<List<Map>>('user', 'customPlaylists', playlists));
-    unawaited(syncOfflinePlaylistMetadata(updated));
+    if (!mounted) return;
 
     setState(() {
       _playlist = updated;
@@ -785,6 +796,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                     onPressed: () => audioHandler.playPlaylistSong(
                       playlist: _playlist,
                       songIndex: 0,
+                      context: _playbackContextForPlaylist(),
                     ),
                   ),
                 ),
@@ -800,12 +812,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
                     onPressed: () async {
                       final songs = _playlist['list'] as List? ?? [];
                       if (songs.isEmpty) return;
-                      final shuffled = List<Map>.from(songs.whereType<Map>())
-                        ..shuffle();
-                      await audioHandler.addPlaylistToQueue(
-                        shuffled,
-                        replace: true,
-                        startIndex: 0,
+                      await audioHandler.playPlaylistSong(
+                        playlist: _playlist,
+                        songIndex: 0,
+                        context: _playbackContextForPlaylist(),
+                        enableShuffle: true,
                       );
                     },
                   ),
@@ -959,6 +970,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
         audioHandler.playPlaylistSong(
           playlist: _playlist,
           songIndex: fullIndex != -1 ? fullIndex : index,
+          context: _playbackContextForPlaylist(),
         );
       },
       borderRadius: borderRadius,
