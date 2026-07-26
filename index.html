@@ -6,7 +6,7 @@
     <title>WiyaMusic — Stream effortlessly with one app</title>
     <meta
       name="description"
-      content="WiyaMusic is a free music streaming app with offline listening, lyrics, equalizer, SponsorBlock, and no ads or subscriptions. Download the Android APK or iOS installer."
+      content="WiyaMusic is a free music streaming app with offline listening, lyrics, equalizer, SponsorBlock, and no ads or subscriptions. Download the Android APK today — iOS coming soon."
     />
     <meta name="theme-color" content="#050B1B" />
     <meta name="color-scheme" content="dark" />
@@ -19,7 +19,7 @@
     <meta property="og:title" content="WiyaMusic — Stream effortlessly with one app" />
     <meta
       property="og:description"
-      content="Free music streaming with offline listening, lyrics, equalizer, and no ads. Download for Android and iOS."
+      content="Free music streaming with offline listening, lyrics, equalizer, and no ads. Download for Android — iOS coming soon."
     />
     <meta
       property="og:image"
@@ -73,7 +73,45 @@
           <a href="#screenshots">Screenshots</a>
           <a href="#platforms">Platforms</a>
           <a href="#faq">FAQ</a>
-          <a class="button button-small" href="#download">Download</a>
+          <div class="nav-download" data-download-menu>
+            <button
+              class="button button-small nav-download-toggle"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="download-menu"
+              data-download-toggle
+            >
+              Download
+              <span class="nav-download-caret" aria-hidden="true">▾</span>
+            </button>
+            <div
+              class="nav-download-panel"
+              id="download-menu"
+              role="menu"
+              aria-label="Download options"
+              data-download-panel
+            >
+              <a
+                class="nav-download-item"
+                role="menuitem"
+                href="downloads/android/wiyamusic.apk"
+                download
+              >
+                <span class="nav-download-item-title">Download for Android</span>
+                <span class="nav-download-item-sub">Direct APK · free</span>
+              </a>
+              <span
+                class="nav-download-item is-soon"
+                role="menuitem"
+                aria-disabled="true"
+                title="iOS download coming soon"
+              >
+                <span class="nav-download-item-title">Download for iOS</span>
+                <span class="nav-download-item-sub">Coming soon</span>
+              </span>
+            </div>
+          </div>
         </nav>
       </div>
     </header>
@@ -98,16 +136,16 @@
               >
                 Download for Android
               </a>
-              <a
-                class="button button-ghost"
-                href="downloads/ios/wiyamusic.ipa"
-                download
+              <span
+                class="button button-ghost button-soon"
+                aria-disabled="true"
+                title="iOS download coming soon"
               >
-                Download for iOS
-              </a>
+                iOS — Coming soon
+              </span>
             </div>
             <p class="hero-meta">
-              Android APK · iOS installer · Free to use
+              Android APK available · iOS coming soon · Free to use
             </p>
           </div>
 
@@ -140,7 +178,7 @@
           </article>
           <article class="highlight-card">
             <h2>Easy install</h2>
-            <p>Grab the APK or iOS installer and start listening.</p>
+            <p>Grab the Android APK today — iOS is coming soon.</p>
           </article>
         </div>
       </section>
@@ -206,48 +244,154 @@
             <p class="eyebrow">Screenshots</p>
             <h2>A dark, focused listening experience</h2>
             <p>
-              Home, library, now playing, and album views designed for mobile
-              first.
+              Home, search, library, now playing, lyrics, and equalizer views
+              designed for mobile first.
             </p>
           </div>
 
-          <div class="screenshot-rail" data-rail>
-            <figure class="phone-frame">
-              <img
-                src="assets/images/screenshot-01.jpg"
-                alt="WiyaMusic home screen"
-                loading="lazy"
-                width="806"
-                height="1795"
-              />
-            </figure>
-            <figure class="phone-frame">
-              <img
-                src="assets/images/screenshot-02.jpg"
-                alt="WiyaMusic library screen"
-                loading="lazy"
-                width="806"
-                height="1795"
-              />
-            </figure>
-            <figure class="phone-frame">
-              <img
-                src="assets/images/screenshot-03.jpg"
-                alt="WiyaMusic now playing screen"
-                loading="lazy"
-                width="806"
-                height="1795"
-              />
-            </figure>
-            <figure class="phone-frame">
-              <img
-                src="assets/images/screenshot-04.jpg"
-                alt="WiyaMusic album detail screen"
-                loading="lazy"
-                width="806"
-                height="1795"
-              />
-            </figure>
+          <div
+            class="shot-carousel"
+            data-carousel
+            role="region"
+            aria-roledescription="carousel"
+            aria-label="WiyaMusic app screenshots"
+          >
+            <div class="shot-carousel-stage" data-carousel-stage>
+              <div class="shot-carousel-glow" aria-hidden="true"></div>
+
+              <button
+                class="shot-nav shot-nav-prev"
+                type="button"
+                data-carousel-prev
+                aria-label="Previous screenshot"
+              >
+                <span aria-hidden="true">‹</span>
+              </button>
+
+              <div class="shot-track" data-carousel-track>
+                <figure
+                  class="phone-frame shot-slide is-active"
+                  data-slide
+                  data-label="Home"
+                  data-caption="Discover featured albums and pick up where you left off."
+                >
+                  <img
+                    src="assets/images/screenshots/screenshot-01.jpeg"
+                    alt="WiyaMusic home screen with recently played songs"
+                    loading="lazy"
+                    width="956"
+                    height="2050"
+                  />
+                </figure>
+                <figure
+                  class="phone-frame shot-slide"
+                  data-slide
+                  data-label="Search"
+                  data-caption="Browse trending searches, genres, and top artists."
+                >
+                  <img
+                    src="assets/images/screenshots/screenshot-02.jpeg"
+                    alt="WiyaMusic search screen with trending searches and genres"
+                    loading="lazy"
+                    width="956"
+                    height="2050"
+                  />
+                </figure>
+                <figure
+                  class="phone-frame shot-slide"
+                  data-slide
+                  data-label="Library"
+                  data-caption="Your playlists, liked songs, and albums in one place."
+                >
+                  <img
+                    src="assets/images/screenshots/screenshot-03.jpeg"
+                    alt="WiyaMusic library screen with playlists and liked songs"
+                    loading="lazy"
+                    width="956"
+                    height="2050"
+                  />
+                </figure>
+                <figure
+                  class="phone-frame shot-slide"
+                  data-slide
+                  data-label="Now Playing"
+                  data-caption="Full-screen playback with like, shuffle, and queue."
+                >
+                  <img
+                    src="assets/images/screenshots/screenshot-04.jpeg"
+                    alt="WiyaMusic now playing screen"
+                    loading="lazy"
+                    width="956"
+                    height="2050"
+                  />
+                </figure>
+                <figure
+                  class="phone-frame shot-slide"
+                  data-slide
+                  data-label="Lyrics"
+                  data-caption="Follow along with synced lyrics while you listen."
+                >
+                  <img
+                    src="assets/images/screenshots/screenshot-05.jpeg"
+                    alt="WiyaMusic synced lyrics view"
+                    loading="lazy"
+                    width="956"
+                    height="2050"
+                  />
+                </figure>
+                <figure
+                  class="phone-frame shot-slide"
+                  data-slide
+                  data-label="Share"
+                  data-caption="Share a polished song card with WiyaMusic branding."
+                >
+                  <img
+                    src="assets/images/screenshots/screenshot-06.jpeg"
+                    alt="WiyaMusic share song card"
+                    loading="lazy"
+                    width="956"
+                    height="2050"
+                  />
+                </figure>
+                <figure
+                  class="phone-frame shot-slide"
+                  data-slide
+                  data-label="Equalizer"
+                  data-caption="Tune the sound with presets and custom frequency bands."
+                >
+                  <img
+                    src="assets/images/screenshots/screenshot-07.jpeg"
+                    alt="WiyaMusic built-in equalizer with presets"
+                    loading="lazy"
+                    width="956"
+                    height="2050"
+                  />
+                </figure>
+              </div>
+
+              <button
+                class="shot-nav shot-nav-next"
+                type="button"
+                data-carousel-next
+                aria-label="Next screenshot"
+              >
+                <span aria-hidden="true">›</span>
+              </button>
+            </div>
+
+            <div class="shot-meta">
+              <p class="shot-label" data-carousel-label>Home</p>
+              <p class="shot-caption" data-carousel-caption>
+                Discover featured albums and pick up where you left off.
+              </p>
+            </div>
+
+            <div
+              class="shot-dots"
+              data-carousel-dots
+              role="tablist"
+              aria-label="Choose screenshot"
+            ></div>
           </div>
         </div>
       </section>
@@ -258,19 +402,18 @@
             <p class="eyebrow">Platforms</p>
             <h2>Download and install</h2>
             <p>
-              WiyaMusic is available as a direct download. Install the Android
-              APK on your phone, or use the iOS installer when a build is
-              provided for your device.
+              WiyaMusic is available as a direct Android download. Install the
+              APK on your phone today — an iOS build is coming soon.
             </p>
             <div class="inline-actions">
               <a class="button" href="downloads/android/wiyamusic.apk" download
                 >Android APK</a
               >
-              <a
-                class="button button-ghost"
-                href="downloads/ios/wiyamusic.ipa"
-                download
-                >iOS installer</a
+              <span
+                class="button button-ghost button-soon"
+                aria-disabled="true"
+                title="iOS download coming soon"
+                >iOS — Coming soon</span
               >
             </div>
           </div>
@@ -280,7 +423,7 @@
               <li>No ads</li>
               <li>No subscriptions</li>
               <li>21 supported languages</li>
-              <li>Android &amp; iOS builds</li>
+              <li>Android now · iOS soon</li>
             </ul>
           </aside>
         </div>
@@ -306,9 +449,7 @@
               <p>
                 Download the
                 <a href="downloads/android/wiyamusic.apk">Android APK</a>
-                or the
-                <a href="downloads/ios/wiyamusic.ipa">iOS installer</a>
-                from this site.
+                from this site. An iOS version is coming soon.
               </p>
             </details>
             <details>
@@ -322,9 +463,8 @@
             <details>
               <summary>Is there an iOS version?</summary>
               <p>
-                When an iOS build is available, download the installer from this
-                page. Installation may require a compatible sideloading method
-                or distribution channel for your device.
+                Not yet — iOS is coming soon. Check back here for the installer
+                when it launches.
               </p>
             </details>
             <details>
@@ -350,11 +490,11 @@
             <a class="button" href="downloads/android/wiyamusic.apk" download
               >Download Android</a
             >
-            <a
-              class="button button-ghost"
-              href="downloads/ios/wiyamusic.ipa"
-              download
-              >Download iOS</a
+            <span
+              class="button button-ghost button-soon"
+              aria-disabled="true"
+              title="iOS download coming soon"
+              >iOS — Coming soon</span
             >
           </div>
         </div>
@@ -386,7 +526,7 @@
               <a href="downloads/android/wiyamusic.apk">Android APK</a>
             </li>
             <li>
-              <a href="downloads/ios/wiyamusic.ipa">iOS installer</a>
+              <span class="footer-soon">iOS — Coming soon</span>
             </li>
             <li>
               <a href="#features">Features</a>
