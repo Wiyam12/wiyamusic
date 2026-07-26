@@ -278,7 +278,7 @@ a:hover {
 .hero h1,
 .section-heading h2,
 .cta h2,
-.open-source-grid h2 {
+.download-grid h2 {
   margin: 0;
   font-family: "Paytone One", Inter, sans-serif;
   font-weight: 400;
@@ -293,7 +293,7 @@ a:hover {
 
 .lead,
 .section-heading p,
-.open-source-grid p,
+.download-grid p,
 .cta p {
   color: var(--on-surface-variant);
   font-size: 1.05rem;
@@ -471,7 +471,7 @@ a:hover {
   object-fit: cover;
 }
 
-.open-source-grid {
+.download-grid {
   display: grid;
   grid-template-columns: 1.3fr 0.7fr;
   gap: 2rem;
@@ -606,7 +606,7 @@ a:hover {
 
 @media (max-width: 900px) {
   .hero-grid,
-  .open-source-grid,
+  .download-grid,
   .footer-grid,
   .highlight-grid,
   .feature-grid {
