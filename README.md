@@ -14,10 +14,11 @@ Open `http://127.0.0.1:8080`.
 
 Place release builds in:
 
-- `downloads/android/wiyamusic.apk`
+- `downloads/android/wiyamusic-<version>.apk` (example: `wiyamusic-1.1.0.apk`)
+- `downloads/android/version.json` (must match the APK version/filename)
 - `downloads/ios/wiyamusic.ipa`
 
-The homepage download buttons point to those paths.
+The homepage download buttons are filled from `version.json` at runtime.
 
 ## Deploy
 

@@ -81,6 +81,34 @@
     });
   }
 
+  // Resolve versioned Android APK paths from downloads/android/version.json
+  // so the site always points at wiyamusic-<version>.apk.
+  const applyAndroidVersion = (data) => {
+    if (!data) return;
+    const apkPath =
+      data.apkPath ||
+      (data.filename ? `downloads/android/${data.filename}` : null);
+    if (!apkPath) return;
+
+    document.querySelectorAll("[data-android-download]").forEach((link) => {
+      link.setAttribute("href", apkPath);
+      if (data.filename) {
+        link.setAttribute("download", data.filename);
+      }
+    });
+
+    document.querySelectorAll("[data-android-version]").forEach((el) => {
+      el.textContent = data.version ? `v${data.version}` : "";
+    });
+  };
+
+  fetch("downloads/android/version.json", { cache: "no-store" })
+    .then((response) => (response.ok ? response.json() : null))
+    .then(applyAndroidVersion)
+    .catch(() => {
+      // Keep the static href fallback already present in the HTML.
+    });
+
   const carousel = document.querySelector("[data-carousel]");
   if (!carousel) return;
 
