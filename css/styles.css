@@ -948,6 +948,66 @@ a.nav-download-item:focus-visible {
   max-width: 70rem;
 }
 
+.legal-page {
+  padding: 7.5rem 0 4rem;
+}
+
+.legal-page h1 {
+  margin: 0 0 0.5rem;
+  font-family: "Paytone One", Inter, sans-serif;
+  font-weight: 400;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.15;
+}
+
+.legal-updated {
+  margin: 0 0 2rem;
+  color: var(--on-surface-variant);
+  font-size: 0.95rem;
+}
+
+.legal-content {
+  color: var(--on-surface-variant);
+  line-height: 1.7;
+}
+
+.legal-content h2 {
+  margin: 2.25rem 0 0.75rem;
+  color: var(--on-surface);
+  font-size: 1.25rem;
+}
+
+.legal-content h3 {
+  margin: 1.5rem 0 0.5rem;
+  color: var(--on-surface);
+  font-size: 1.05rem;
+}
+
+.legal-content p,
+.legal-content ul {
+  margin: 0 0 1rem;
+}
+
+.legal-content ul {
+  padding-left: 1.25rem;
+}
+
+.legal-content li + li {
+  margin-top: 0.4rem;
+}
+
+.legal-content a {
+  color: var(--primary);
+}
+
+.legal-content strong {
+  color: var(--on-surface);
+}
+
+.legal-back {
+  margin-top: 2.5rem;
+}
+
 @media (max-width: 900px) {
   .hero-grid,
   .download-grid,
