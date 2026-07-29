@@ -335,6 +335,28 @@ a.nav-download-item:focus-visible {
   user-select: none;
 }
 
+.button-version,
+[data-android-version] {
+  font-variant-numeric: tabular-nums;
+}
+
+.button .button-version {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.hero-meta [data-android-version],
+.footer-downloads [data-android-version],
+.faq-list [data-android-version] {
+  font-weight: 700;
+}
+
 .footer-soon {
   color: var(--on-surface-variant);
 }
