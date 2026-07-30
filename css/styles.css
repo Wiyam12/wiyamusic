@@ -569,6 +569,44 @@ a.nav-download-item:focus-visible {
   color: var(--on-surface-variant);
 }
 
+.shot-device-toggle {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 auto 1.75rem;
+  padding: 0.3rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.shot-device-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0.45rem 1.15rem;
+  background: transparent;
+  color: var(--on-surface-variant);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.shot-device-btn:hover {
+  color: var(--on-surface);
+}
+
+.shot-device-btn.is-active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-deep));
+  color: var(--on-primary);
+}
+
 .shot-carousel {
   position: relative;
   margin-top: 0.5rem;
@@ -581,6 +619,11 @@ a.nav-download-item:focus-visible {
   min-height: clamp(420px, 68vw, 560px);
   perspective: 1400px;
   overflow: hidden;
+  transition: min-height 320ms ease;
+}
+
+.shot-carousel[data-device="tablet"] .shot-carousel-stage {
+  min-height: clamp(460px, 72vw, 640px);
 }
 
 .shot-carousel-glow {
@@ -605,6 +648,21 @@ a.nav-download-item:focus-visible {
   height: min(520px, 116vw);
   max-height: 560px;
   transform-style: preserve-3d;
+  transition:
+    width 320ms ease,
+    height 320ms ease,
+    max-height 320ms ease;
+}
+
+.shot-carousel[data-device="tablet"] .shot-track {
+  width: min(420px, 72vw);
+  height: min(560px, 96vw);
+  max-height: 620px;
+}
+
+.shot-carousel[data-device="phone"] .shot-slide[data-device="tablet"],
+.shot-carousel[data-device="tablet"] .shot-slide[data-device="phone"] {
+  display: none;
 }
 
 .shot-slide {
@@ -626,6 +684,10 @@ a.nav-download-item:focus-visible {
   will-change: transform, opacity;
 }
 
+.shot-slide.tablet-frame {
+  border-radius: 18px;
+}
+
 .shot-slide img {
   width: 100%;
   height: 100%;
@@ -633,6 +695,10 @@ a.nav-download-item:focus-visible {
   aspect-ratio: 956 / 2050;
   pointer-events: none;
   user-select: none;
+}
+
+.shot-slide.tablet-frame img {
+  aspect-ratio: 2048 / 2732;
 }
 
 .shot-slide.is-active {
@@ -729,6 +795,14 @@ a.nav-download-item:focus-visible {
 
 .shot-nav-next {
   right: max(0px, calc(50% - min(260px, 58vw) / 2 - 72px));
+}
+
+.shot-carousel[data-device="tablet"] .shot-nav-prev {
+  left: max(0px, calc(50% - min(420px, 72vw) / 2 - 72px));
+}
+
+.shot-carousel[data-device="tablet"] .shot-nav-next {
+  right: max(0px, calc(50% - min(420px, 72vw) / 2 - 72px));
 }
 
 .shot-meta {
@@ -1128,6 +1202,24 @@ a.nav-download-item:focus-visible {
   .shot-track {
     width: min(220px, 62vw);
     height: min(440px, 124vw);
+  }
+
+  .shot-carousel[data-device="tablet"] .shot-carousel-stage {
+    min-height: 460px;
+  }
+
+  .shot-carousel[data-device="tablet"] .shot-track {
+    width: min(300px, 78vw);
+    height: min(400px, 104vw);
+    max-height: 480px;
+  }
+
+  .shot-carousel[data-device="tablet"] .shot-nav-prev {
+    left: 0.35rem;
+  }
+
+  .shot-carousel[data-device="tablet"] .shot-nav-next {
+    right: 0.35rem;
   }
 
   .shot-slide.is-prev {

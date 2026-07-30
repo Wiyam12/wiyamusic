@@ -112,25 +112,33 @@
   const carousel = document.querySelector("[data-carousel]");
   if (!carousel) return;
 
-  const slides = Array.from(carousel.querySelectorAll("[data-slide]"));
+  const allSlides = Array.from(carousel.querySelectorAll("[data-slide]"));
   const prevBtn = carousel.querySelector("[data-carousel-prev]");
   const nextBtn = carousel.querySelector("[data-carousel-next]");
   const dotsRoot = carousel.querySelector("[data-carousel-dots]");
   const labelEl = carousel.querySelector("[data-carousel-label]");
   const captionEl = carousel.querySelector("[data-carousel-caption]");
   const stage = carousel.querySelector("[data-carousel-stage]");
+  const deviceButtons = Array.from(
+    document.querySelectorAll("[data-device-btn]"),
+  );
   const reduceMotion = window.matchMedia(
     "(prefers-reduced-motion: reduce)",
   ).matches;
 
+  let device = carousel.dataset.device || "phone";
+  let slides = [];
   let index = 0;
   let autoplayId = null;
   let isPaused = false;
   let touchStartX = 0;
   let touchDeltaX = 0;
 
+  const getSlidesForDevice = (nextDevice) =>
+    allSlides.filter((slide) => (slide.dataset.device || "phone") === nextDevice);
+
   const wrap = (value) => {
-    const total = slides.length;
+    const total = slides.length || 1;
     return ((value % total) + total) % total;
   };
 
@@ -157,6 +165,38 @@
     }, 160);
   };
 
+  const rebuildDots = () => {
+    if (!dotsRoot) return;
+    dotsRoot.replaceChildren();
+
+    slides.forEach((slide, i) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "shot-dot";
+      button.setAttribute("role", "tab");
+      button.setAttribute(
+        "aria-label",
+        slide.dataset.label || `Screenshot ${i + 1}`,
+      );
+      button.textContent = slide.dataset.label || String(i + 1);
+      button.addEventListener("click", () => {
+        goTo(i);
+        startAutoplay();
+      });
+      dotsRoot.appendChild(button);
+    });
+  };
+
+  const bindSlideClicks = () => {
+    slides.forEach((slide, i) => {
+      slide.onclick = () => {
+        if (i === index) return;
+        goTo(i);
+        startAutoplay();
+      };
+    });
+  };
+
   const render = () => {
     slides.forEach((slide, i) => {
       slide.classList.remove(
@@ -171,7 +211,8 @@
       );
 
       const offset = wrap(i - index);
-      const mirrored = offset > slides.length / 2 ? offset - slides.length : offset;
+      const mirrored =
+        offset > slides.length / 2 ? offset - slides.length : offset;
 
       if (mirrored === 0) {
         slide.classList.add("is-active");
@@ -229,26 +270,35 @@
   };
 
   const startAutoplay = () => {
-    if (reduceMotion || isPaused) return;
+    if (reduceMotion || isPaused || slides.length < 2) return;
     stopAutoplay();
     autoplayId = window.setInterval(next, 4200);
   };
 
-  if (dotsRoot) {
-    slides.forEach((slide, i) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "shot-dot";
-      button.setAttribute("role", "tab");
-      button.setAttribute("aria-label", slide.dataset.label || `Screenshot ${i + 1}`);
-      button.textContent = slide.dataset.label || String(i + 1);
-      button.addEventListener("click", () => {
-        goTo(i);
-        startAutoplay();
-      });
-      dotsRoot.appendChild(button);
+  const setDevice = (nextDevice) => {
+    if (nextDevice !== "phone" && nextDevice !== "tablet") return;
+    device = nextDevice;
+    carousel.dataset.device = device;
+
+    deviceButtons.forEach((button) => {
+      const active = button.dataset.deviceBtn === device;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
     });
-  }
+
+    slides = getSlidesForDevice(device);
+    index = 0;
+    rebuildDots();
+    bindSlideClicks();
+    render();
+    startAutoplay();
+  };
+
+  deviceButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setDevice(button.dataset.deviceBtn || "phone");
+    });
+  });
 
   prevBtn?.addEventListener("click", () => {
     prev();
@@ -258,14 +308,6 @@
   nextBtn?.addEventListener("click", () => {
     next();
     startAutoplay();
-  });
-
-  slides.forEach((slide, i) => {
-    slide.addEventListener("click", () => {
-      if (i === index) return;
-      goTo(i);
-      startAutoplay();
-    });
   });
 
   carousel.addEventListener("keydown", (event) => {
@@ -335,6 +377,5 @@
     else startAutoplay();
   });
 
-  render();
-  startAutoplay();
+  setDevice(device);
 })();

@@ -249,14 +249,40 @@
             <p class="eyebrow">Screenshots</p>
             <h2>A dark, focused listening experience</h2>
             <p>
-              Home, search, library, now playing, lyrics, and equalizer views
-              designed for mobile first.
+              Home, search, library, now playing, lyrics, and equalizer —
+              crafted for phone and iPad.
             </p>
+          </div>
+
+          <div
+            class="shot-device-toggle"
+            role="tablist"
+            aria-label="Screenshot device"
+          >
+            <button
+              type="button"
+              class="shot-device-btn is-active"
+              data-device-btn="phone"
+              role="tab"
+              aria-selected="true"
+            >
+              Phone
+            </button>
+            <button
+              type="button"
+              class="shot-device-btn"
+              data-device-btn="tablet"
+              role="tab"
+              aria-selected="false"
+            >
+              Tablet
+            </button>
           </div>
 
           <div
             class="shot-carousel"
             data-carousel
+            data-device="phone"
             role="region"
             aria-roledescription="carousel"
             aria-label="WiyaMusic app screenshots"
@@ -277,6 +303,7 @@
                 <figure
                   class="phone-frame shot-slide is-active"
                   data-slide
+                  data-device="phone"
                   data-label="Home"
                   data-caption="Discover featured albums and pick up where you left off."
                 >
@@ -291,6 +318,7 @@
                 <figure
                   class="phone-frame shot-slide"
                   data-slide
+                  data-device="phone"
                   data-label="Search"
                   data-caption="Browse trending searches, genres, and top artists."
                 >
@@ -305,6 +333,7 @@
                 <figure
                   class="phone-frame shot-slide"
                   data-slide
+                  data-device="phone"
                   data-label="Library"
                   data-caption="Your playlists, liked songs, and albums in one place."
                 >
@@ -319,6 +348,7 @@
                 <figure
                   class="phone-frame shot-slide"
                   data-slide
+                  data-device="phone"
                   data-label="Now Playing"
                   data-caption="Full-screen playback with like, shuffle, and queue."
                 >
@@ -333,6 +363,7 @@
                 <figure
                   class="phone-frame shot-slide"
                   data-slide
+                  data-device="phone"
                   data-label="Lyrics"
                   data-caption="Follow along with synced lyrics while you listen."
                 >
@@ -347,6 +378,7 @@
                 <figure
                   class="phone-frame shot-slide"
                   data-slide
+                  data-device="phone"
                   data-label="Share"
                   data-caption="Share a polished song card with WiyaMusic branding."
                 >
@@ -361,6 +393,7 @@
                 <figure
                   class="phone-frame shot-slide"
                   data-slide
+                  data-device="phone"
                   data-label="Equalizer"
                   data-caption="Tune the sound with presets and custom frequency bands."
                 >
@@ -370,6 +403,112 @@
                     loading="lazy"
                     width="956"
                     height="2050"
+                  />
+                </figure>
+
+                <figure
+                  class="tablet-frame shot-slide"
+                  data-slide
+                  data-device="tablet"
+                  data-label="Home"
+                  data-caption="A spacious home layout with featured albums and recent listening."
+                >
+                  <img
+                    src="assets/images/screenshots/ipad/screenshot-01.png"
+                    alt="WiyaMusic iPad home screen"
+                    loading="lazy"
+                    width="2048"
+                    height="2732"
+                  />
+                </figure>
+                <figure
+                  class="tablet-frame shot-slide"
+                  data-slide
+                  data-device="tablet"
+                  data-label="Library"
+                  data-caption="Sidebar navigation keeps library sections and playlists in reach."
+                >
+                  <img
+                    src="assets/images/screenshots/ipad/screenshot-02.png"
+                    alt="WiyaMusic iPad library with sidebar"
+                    loading="lazy"
+                    width="2048"
+                    height="2732"
+                  />
+                </figure>
+                <figure
+                  class="tablet-frame shot-slide"
+                  data-slide
+                  data-device="tablet"
+                  data-label="Playlists"
+                  data-caption="Browse playlists with cover art in a tablet-friendly layout."
+                >
+                  <img
+                    src="assets/images/screenshots/ipad/screenshot-03.png"
+                    alt="WiyaMusic iPad playlists view"
+                    loading="lazy"
+                    width="2048"
+                    height="2732"
+                  />
+                </figure>
+                <figure
+                  class="tablet-frame shot-slide"
+                  data-slide
+                  data-device="tablet"
+                  data-label="Now Playing"
+                  data-caption="Artwork and controls share the screen for a focused listen."
+                >
+                  <img
+                    src="assets/images/screenshots/ipad/screenshot-04.png"
+                    alt="WiyaMusic iPad now playing screen"
+                    loading="lazy"
+                    width="2048"
+                    height="2732"
+                  />
+                </figure>
+                <figure
+                  class="tablet-frame shot-slide"
+                  data-slide
+                  data-device="tablet"
+                  data-label="Queue"
+                  data-caption="Show or hide the queue beside playback on iPad."
+                >
+                  <img
+                    src="assets/images/screenshots/ipad/screenshot-05.png"
+                    alt="WiyaMusic iPad now playing with queue"
+                    loading="lazy"
+                    width="2048"
+                    height="2732"
+                  />
+                </figure>
+                <figure
+                  class="tablet-frame shot-slide"
+                  data-slide
+                  data-device="tablet"
+                  data-label="Search"
+                  data-caption="Search and discovery expand across the larger canvas."
+                >
+                  <img
+                    src="assets/images/screenshots/ipad/screenshot-06.png"
+                    alt="WiyaMusic iPad search screen"
+                    loading="lazy"
+                    width="2048"
+                    height="2732"
+                  />
+                </figure>
+                <figure
+                  class="tablet-frame shot-slide"
+                  data-slide
+                  data-device="tablet"
+                  data-label="Equalizer"
+                  data-caption="Fine-tune sound with presets on a roomy tablet layout."
+                >
+                  <img
+                    src="assets/images/screenshots/ipad/screenshot-07.png"
+                    alt="WiyaMusic iPad equalizer"
+                    loading="lazy"
+                    width="2048"
+                    height="2732"
                   />
                 </figure>
               </div>
