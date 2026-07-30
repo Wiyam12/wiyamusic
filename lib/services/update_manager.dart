@@ -1,29 +1,7 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:wiyamusic/constants/version.dart';
@@ -32,142 +10,207 @@ import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/url_launcher.dart';
 import 'package:wiyamusic/widgets/auto_format_text.dart';
 
+/// Live website version manifest (versioned APK + changelog).
 const String checkUrl =
-    'https://raw.githubusercontent.com/Wiyam12/wiyamusic/update/check.json';
-const String releasesUrl =
-    'https://api.github.com/repos/Wiyam12/wiyamusic/releases/latest';
+    'https://wiyam12.github.io/wiyamusic/downloads/android/version.json';
 const String downloadUrlKey = 'url';
 const String downloadUrlArm64Key = 'arm64url';
-const String downloadFilename = 'WiyaMusic.apk';
 
-Future<void> checkAppUpdates() async {
+const String _skippedUpdateVersionKey = 'skippedUpdateVersion';
+
+Future<void> checkAppUpdates({bool manual = false}) async {
+  BuildContext? dialogContext;
   try {
-    final response = await http.get(Uri.parse(checkUrl));
+    dialogContext = NavigationManager().context;
+  } catch (_) {
+    dialogContext = null;
+  }
+
+  try {
+    final response = await http
+        .get(Uri.parse(checkUrl))
+        .timeout(const Duration(seconds: 12));
 
     if (response.statusCode != 200) {
       logger.log(
         'Fetch update API (checkUrl) call returned status code ${response.statusCode}',
       );
+      if (manual && dialogContext != null && dialogContext.mounted) {
+        showToast(dialogContext, dialogContext.l10n!.error);
+      }
       return;
     }
 
     final map = json.decode(response.body) as Map<String, dynamic>;
-    announcementURL.value = map['announcementurl'];
-    final latestVersion = map['version'].toString();
+    final announcement = map['announcementurl']?.toString();
+    if (announcement != null && announcement.isNotEmpty) {
+      announcementURL.value = announcement;
+    }
+
+    final latestVersion = map['version']?.toString().trim() ?? '';
+    if (latestVersion.isEmpty) {
+      if (manual && dialogContext != null && dialogContext.mounted) {
+        showToast(dialogContext, dialogContext.l10n!.error);
+      }
+      return;
+    }
 
     if (!isLatestVersionHigher(appVersion, latestVersion)) {
+      if (manual && dialogContext != null && dialogContext.mounted) {
+        showToast(dialogContext, dialogContext.l10n!.noUpdateAvailable);
+      }
       return;
     }
 
-    final releasesRequest = await http.get(Uri.parse(releasesUrl));
-
-    if (releasesRequest.statusCode != 200) {
-      logger.log(
-        'Fetch update API (releasesUrl) call returned status code ${response.statusCode}',
-      );
-      return;
+    // Auto prompts respect "don't display again" for this exact version.
+    if (!manual) {
+      final skipped = await getData('settings', _skippedUpdateVersionKey);
+      if (skipped?.toString() == latestVersion) {
+        return;
+      }
     }
 
-    final releasesResponse =
-        json.decode(releasesRequest.body) as Map<String, dynamic>;
+    if (dialogContext == null || !dialogContext.mounted) return;
 
-    await showDialog(
-      context: NavigationManager().context,
+    final changelog = (map['changelog']?.toString().trim().isNotEmpty ?? false)
+        ? map['changelog'].toString().trim()
+        : 'WiyaMusic $latestVersion is ready to install.';
+
+    await showDialog<void>(
+      context: dialogContext,
       builder: (BuildContext context) {
         final colorScheme = Theme.of(context).colorScheme;
+        var dontShowAgain = false;
 
-        return AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  FluentIcons.arrow_download_24_regular,
-                  color: colorScheme.onPrimaryContainer,
-                  size: 32,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                context.l10n!.appUpdateIsAvailable,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'V$latestVersion',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: colorScheme.onPrimaryContainer,
+        return StatefulBuilder(
+          builder: (context, setState) {
+            Future<void> persistSkipIfNeeded() async {
+              if (!dontShowAgain) return;
+              await addOrUpdateData<String>(
+                'settings',
+                _skippedUpdateVersionKey,
+                latestVersion,
+              );
+            }
+
+            return AlertDialog(
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      FluentIcons.arrow_download_24_regular,
+                      color: colorScheme.onPrimaryContainer,
+                      size: 32,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  Text(
+                    context.l10n!.appUpdateIsAvailable,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'V$latestVersion',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(context).height / 2.5,
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: SingleChildScrollView(
+                      child: AutoFormatText(text: changelog),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    value: dontShowAgain,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: Text(
+                      context.l10n!.dontShowAgain,
+                      style: TextStyle(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 14,
+                      ),
+                    ),
+                    onChanged: (value) {
+                      setState(() => dontShowAgain = value ?? false);
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Container(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.sizeOf(context).height / 2.5,
+              actionsAlignment: MainAxisAlignment.center,
+              actions: <Widget>[
+                OutlinedButton(
+                  onPressed: () async {
+                    await persistSkipIfNeeded();
+                    if (context.mounted) Navigator.pop(context);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: colorScheme.outline),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(context.l10n!.cancel),
                 ),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(16),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await persistSkipIfNeeded();
+                    final url = await getDownloadUrl(map);
+                    await launchURL(Uri.parse(url));
+                    if (context.mounted) Navigator.pop(context);
+                  },
+                  icon: const Icon(FluentIcons.arrow_download_20_regular),
+                  label: Text(context.l10n!.download),
                 ),
-                child: SingleChildScrollView(
-                  child: AutoFormatText(text: releasesResponse['body']),
-                ),
-              ),
-            ],
-          ),
-          actionsAlignment: MainAxisAlignment.center,
-          actions: <Widget>[
-            OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: colorScheme.outline),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: Text(context.l10n!.cancel),
-            ),
-            FilledButton.icon(
-              onPressed: () {
-                getDownloadUrl(map).then(
-                  (url) => {launchURL(Uri.parse(url)), Navigator.pop(context)},
-                );
-              },
-              icon: const Icon(FluentIcons.arrow_download_20_regular),
-              label: Text(context.l10n!.download),
-            ),
-          ],
+              ],
+            );
+          },
         );
       },
     );
   } catch (e, stackTrace) {
     logger.log('Error in checkAppUpdates', error: e, stackTrace: stackTrace);
+    if (manual && dialogContext != null && dialogContext.mounted) {
+      showToast(dialogContext, dialogContext.l10n!.error);
+    }
   }
 }
 
@@ -216,7 +259,7 @@ void showUpdateCheckDialog(BuildContext context) {
             onPressed: () {
               shouldWeCheckUpdates.value = true;
               addOrUpdateData<bool>('settings', 'shouldWeCheckUpdates', true);
-              if (!isFdroidBuild && kReleaseMode && !offlineMode.value) {
+              if (!isFdroidBuild && !offlineMode.value) {
                 checkAppUpdates();
                 isUpdateChecked = true;
               }
@@ -238,10 +281,10 @@ bool isLatestVersionHigher(String appVersion, String latestVersion) {
       : parsedAppLatestVersion.length;
   for (var i = 0; i < length; i++) {
     final value1 = i < parsedAppVersion.length
-        ? int.parse(parsedAppVersion[i])
+        ? int.tryParse(parsedAppVersion[i]) ?? 0
         : 0;
     final value2 = i < parsedAppLatestVersion.length
-        ? int.parse(parsedAppLatestVersion[i])
+        ? int.tryParse(parsedAppLatestVersion[i]) ?? 0
         : 0;
     if (value2 > value1) {
       return true;
@@ -254,28 +297,43 @@ bool isLatestVersionHigher(String appVersion, String latestVersion) {
 }
 
 Future<String> getCPUArchitecture() async {
-  final info = await Process.run('uname', ['-m']);
-  final cpu = info.stdout.toString().replaceAll('\n', '');
-
-  return cpu;
+  try {
+    final info = await Process.run('uname', ['-m']);
+    return info.stdout.toString().replaceAll('\n', '');
+  } catch (_) {
+    return '';
+  }
 }
 
 Future<String> getDownloadUrl(Map<String, dynamic> map) async {
   final cpuArchitecture = await getCPUArchitecture();
-  final url = cpuArchitecture == 'aarch64'
-      ? map[downloadUrlArm64Key].toString()
-      : map[downloadUrlKey].toString();
+  final arm64 = map[downloadUrlArm64Key]?.toString();
+  final universal = map[downloadUrlKey]?.toString();
+  final apkPath = map['apkPath']?.toString();
 
-  return url;
+  if (cpuArchitecture == 'aarch64' &&
+      arm64 != null &&
+      arm64.isNotEmpty &&
+      arm64 != 'null') {
+    return arm64;
+  }
+  if (universal != null && universal.isNotEmpty && universal != 'null') {
+    return universal;
+  }
+  if (apkPath != null && apkPath.isNotEmpty) {
+    return 'https://wiyam12.github.io/wiyamusic/$apkPath';
+  }
+  return 'https://wiyam12.github.io/wiyamusic/downloads/android/wiyamusic.apk';
 }
 
-/// Fetch only the announcement URL from the `check.json` file and set the
-/// global `announcementURL` ValueNotifier. This does not trigger releases
-/// fetching or any update dialogs/downloads and is safe to call for F‑Droid
-/// builds where update prompts are not allowed.
+/// Fetch only the announcement URL from the version manifest and set the
+/// global `announcementURL` ValueNotifier. This does not trigger update
+/// dialogs/downloads and is safe to call for F‑Droid builds.
 Future<void> fetchAnnouncementOnly() async {
   try {
-    final response = await http.get(Uri.parse(checkUrl));
+    final response = await http
+        .get(Uri.parse(checkUrl))
+        .timeout(const Duration(seconds: 12));
 
     if (response.statusCode != 200) {
       logger.log(
@@ -286,7 +344,7 @@ Future<void> fetchAnnouncementOnly() async {
 
     final map = json.decode(response.body) as Map<String, dynamic>;
     final ann = map['announcementurl'];
-    if (ann != null) {
+    if (ann != null && ann.toString().isNotEmpty) {
       announcementURL.value = ann.toString();
     }
   } catch (e, stackTrace) {

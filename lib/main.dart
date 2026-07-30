@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:async';
 import 'dart:io';
 
@@ -43,6 +22,7 @@ import 'package:wiyamusic/services/download_notification_service.dart';
 import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/listening_stats_service.dart';
 import 'package:wiyamusic/services/logger_service.dart';
+import 'package:wiyamusic/services/offline_download_coordinator.dart';
 import 'package:wiyamusic/services/playlist_sharing.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
@@ -172,28 +152,20 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
     }
 
     if (!isFdroidBuild && Platform.isAndroid) {
-      if (shouldWeCheckUpdates.value == true) {
-        if (!isUpdateChecked && kReleaseMode) {
-          SchedulerBinding.instance.addPostFrameCallback((_) {
-            if (!offlineMode.value) {
-              checkAppUpdates();
-            }
-            isUpdateChecked = true;
-          });
-        }
-      } else {
-        if (shouldWeCheckUpdates.value == null) {
-          // Temporarily disabled: update-check consent modal
-          // SchedulerBinding.instance.addPostFrameCallback((_) {
-          //   showUpdateCheckDialog(NavigationManager().context);
-          // });
-        } else {
-          SchedulerBinding.instance.addPostFrameCallback((_) async {
-            if (!offlineMode.value) {
-              await fetchAnnouncementOnly();
-            }
-          });
-        }
+      // Auto-check when online (skipped versions respect "don't display again").
+      if (!isUpdateChecked && shouldWeCheckUpdates.value != false) {
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (!offlineMode.value) {
+            unawaited(checkAppUpdates());
+          }
+          isUpdateChecked = true;
+        });
+      } else if (shouldWeCheckUpdates.value == false) {
+        SchedulerBinding.instance.addPostFrameCallback((_) async {
+          if (!offlineMode.value) {
+            await fetchAnnouncementOnly();
+          }
+        });
       }
     } else if (!offlineMode.value) {
       SchedulerBinding.instance.addPostFrameCallback((_) async {
@@ -216,6 +188,19 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
         wasPlaying: audioHandler.audioPlayer.playing,
       );
       unawaited(listeningStatsService.flush());
+    }
+
+    // On iOS, pause the download queue when truly backgrounded so we do not
+    // thrash CPU while suspended. Resume safely when returning to foreground
+    // without starting duplicate sessions (locks + slots already prevent that).
+    if (Platform.isIOS) {
+      if (state == AppLifecycleState.paused ||
+          state == AppLifecycleState.hidden ||
+          state == AppLifecycleState.detached) {
+        offlineDownloadCoordinator.pause();
+      } else if (state == AppLifecycleState.resumed) {
+        offlineDownloadCoordinator.resume();
+      }
     }
   }
 

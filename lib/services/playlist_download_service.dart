@@ -1,26 +1,5 @@
 // ignore_for_file: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
 
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
@@ -33,6 +12,7 @@ import 'package:wiyamusic/services/common_services.dart';
 import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/download_notification_service.dart';
 import 'package:wiyamusic/services/io_service.dart';
+import 'package:wiyamusic/services/offline_download_coordinator.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/utilities/flutter_toast.dart';
 
@@ -129,9 +109,22 @@ class OfflinePlaylistService {
       return;
     }
 
-    // Set up progress tracking
+    // Set up progress tracking (dedupe by ytid so the same song is never
+    // downloaded twice in one playlist run).
+    final seenYtids = <String>{};
+    final uniqueSongs = <dynamic>[];
+    for (final song in songsList) {
+      final id = song is Map ? song['ytid']?.toString() : null;
+      if (id == null || id.isEmpty) {
+        uniqueSongs.add(song);
+        continue;
+      }
+      if (!seenYtids.add(id)) continue;
+      uniqueSongs.add(song);
+    }
+
     final progressNotifier = getProgressNotifier(playlistId)
-      ..value = DownloadProgress(total: songsList.length);
+      ..value = DownloadProgress(total: uniqueSongs.length);
     activeDownloads.add(playlistId);
 
     final playlistTitle =
@@ -139,39 +132,31 @@ class OfflinePlaylistService {
         ? playlist['title'].toString().trim()
         : 'Playlist';
 
-    unawaited(
-      downloadNotificationService.startPlaylistDownload(
-        playlistId: playlistId,
-        playlistTitle: playlistTitle,
-        total: songsList.length,
-      ),
-    );
-
     try {
-      final songQueue = Queue<dynamic>.from(songsList);
-      // Keep playlist song downloads sequential to avoid YouTube rate limits.
-      const maxConcurrent = 1;
-      final workerCount = songsList.length < maxConcurrent
-          ? songsList.length
-          : maxConcurrent;
+      // Only one playlist pipeline (and its progress notification) runs at a
+      // time; queued playlists wait without showing a premature "0 of N".
+      await offlineDownloadCoordinator.withPlaylistSlot(() async {
+        await downloadNotificationService.startPlaylistDownload(
+          playlistId: playlistId,
+          playlistTitle: playlistTitle,
+          total: uniqueSongs.length,
+        );
 
-      await Future.wait([
-        for (var i = 0; i < workerCount; i++)
-          _processDownloadQueue(
-            songQueue,
-            progressNotifier,
-            playlistId: playlistId,
-            playlistTitle: playlistTitle,
-          ),
-      ]).timeout(
-        Duration(minutes: songsList.length * 2),
-        onTimeout: () {
-          logger.log('Download timeout for playlist $playlistId');
-          progressNotifier.value.isCancelled = true;
-          progressNotifier.notifyListeners();
-          return <void>[];
-        },
-      );
+        final songQueue = Queue<dynamic>.from(uniqueSongs);
+        await _processDownloadQueue(
+          songQueue,
+          progressNotifier,
+          playlistId: playlistId,
+          playlistTitle: playlistTitle,
+        ).timeout(
+          Duration(minutes: uniqueSongs.length * 2),
+          onTimeout: () {
+            logger.log('Download timeout for playlist $playlistId');
+            progressNotifier.value.isCancelled = true;
+            progressNotifier.notifyListeners();
+          },
+        );
+      });
 
       // Handle completion
       await _handleDownloadCompletion(
@@ -187,13 +172,16 @@ class OfflinePlaylistService {
         stackTrace: stackTrace,
       );
       activeDownloads.remove(playlistId);
+      final completed = progressNotifier.value.completed;
+      final failed = progressNotifier.value.failed;
+      final total = progressNotifier.value.total;
       unawaited(
         downloadNotificationService.finishPlaylistDownload(
           playlistId: playlistId,
           playlistTitle: playlistTitle,
-          completed: progressNotifier.value.completed,
-          failed: progressNotifier.value.failed,
-          total: progressNotifier.value.total,
+          completed: completed,
+          failed: failed,
+          total: total,
           cancelled: true,
         ),
       );
@@ -303,23 +291,29 @@ class OfflinePlaylistService {
         }
       }
 
-      // Clean up the progress notifier now that the download is fully done.
-      cleanupProgressNotifier(playlistId);
+      // Capture queue counters before cleanup resets them to 0/0 — otherwise
+      // the completion notification incorrectly shows "0 of 0 songs".
+      final completed = progressNotifier.value.completed;
+      final failed = progressNotifier.value.failed;
+      final total = progressNotifier.value.total;
+      final cancelled = progressNotifier.value.isCancelled;
 
       final playlistTitle =
           playlist['title']?.toString().trim().isNotEmpty == true
           ? playlist['title'].toString().trim()
           : 'Playlist';
-      unawaited(
-        downloadNotificationService.finishPlaylistDownload(
-          playlistId: playlistId,
-          playlistTitle: playlistTitle,
-          completed: progressNotifier.value.completed,
-          failed: progressNotifier.value.failed,
-          total: progressNotifier.value.total,
-          cancelled: progressNotifier.value.isCancelled,
-        ),
+
+      // Replace the progress notification before wiping local progress state.
+      await downloadNotificationService.finishPlaylistDownload(
+        playlistId: playlistId,
+        playlistTitle: playlistTitle,
+        completed: completed,
+        failed: failed,
+        total: total,
+        cancelled: cancelled,
       );
+
+      cleanupProgressNotifier(playlistId);
     } catch (e, stackTrace) {
       logger.log(
         'Error handling download completion',
@@ -537,7 +531,17 @@ class OfflinePlaylistService {
     required String playlistId,
     required String playlistTitle,
   }) async {
+    DateTime? lastUiProgressAt;
+    var lastUiSongProgress = -1.0;
+    final uiInterval = Platform.isIOS
+        ? const Duration(milliseconds: 1500)
+        : const Duration(milliseconds: 800);
+    final uiStep = Platform.isIOS ? 0.08 : 0.05;
+
     while (songQueue.isNotEmpty && !progressNotifier.value.isCancelled) {
+      await offlineDownloadCoordinator.waitWhilePaused();
+      if (progressNotifier.value.isCancelled) break;
+
       final song = songQueue.removeFirst();
 
       try {
@@ -578,11 +582,22 @@ class OfflinePlaylistService {
           );
         } else {
           try {
+            lastUiSongProgress = -1;
             final success = await makeSongOffline(
               song,
               cancelExisting: false,
               showNotification: false,
               onProgress: (songProgress) {
+                final now = DateTime.now();
+                final jumped =
+                    lastUiSongProgress < 0 ||
+                    (songProgress - lastUiSongProgress).abs() >= uiStep;
+                final timedOut =
+                    lastUiProgressAt == null ||
+                    now.difference(lastUiProgressAt!) >= uiInterval;
+                if (!jumped && !timedOut && songProgress < 0.999) return;
+                lastUiProgressAt = now;
+                lastUiSongProgress = songProgress;
                 _notifyPlaylistProgress(
                   playlistId: playlistId,
                   playlistTitle: playlistTitle,
@@ -599,8 +614,10 @@ class OfflinePlaylistService {
             }
           } on SongOfflineRateLimited {
             progressNotifier.value.failed++;
-            // Back off hard when YouTube rate-limits playlist downloads.
-            await Future<void>.delayed(const Duration(seconds: 8));
+            // Single backoff — no tight auto-retry loop.
+            await Future<void>.delayed(
+              offlineDownloadCoordinator.rateLimitBackoff,
+            );
           }
           progressNotifier.notifyListeners();
           _notifyPlaylistProgress(
@@ -608,8 +625,10 @@ class OfflinePlaylistService {
             playlistTitle: playlistTitle,
             progress: progressNotifier.value,
           );
-          // Brief pause between songs to reduce YouTube rate limiting.
-          await Future<void>.delayed(const Duration(milliseconds: 400));
+          // Brief pause between songs to reduce CPU heat / rate limiting.
+          await Future<void>.delayed(
+            offlineDownloadCoordinator.interSongDelay,
+          );
         }
       } catch (e, stackTrace) {
         logger.log(

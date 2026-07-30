@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -33,6 +12,7 @@ import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/download_notification_service.dart';
 import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/lyrics_manager.dart';
+import 'package:wiyamusic/services/offline_download_coordinator.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/proxy_manager.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
@@ -1178,43 +1158,58 @@ Future<bool> makeSongOffline(
       );
     }
 
-    final offlineSong = Map<String, dynamic>.from(song as Map);
+    // Global concurrency gate — at most one song download app-wide.
+    return await offlineDownloadCoordinator.withSongSlot(() async {
+      final offlineSong = Map<String, dynamic>.from(song as Map);
 
-    final audioPath = FilePaths.getAudioPath(ytid);
-    final audioFile = File(audioPath);
-    final artworkPath = FilePaths.getArtworkPath(ytid);
+      final audioPath = FilePaths.getAudioPath(ytid!);
+      final audioFile = File(audioPath);
+      final artworkPath = FilePaths.getArtworkPath(ytid);
 
-    await audioFile.parent.create(recursive: true);
+      await audioFile.parent.create(recursive: true);
 
-    IOSink? fileStream;
-    DateTime? lastNotifUpdate;
-    try {
-      if (session.cancelled) throw SongOfflineDownloadCancelled();
+      IOSink? fileStream;
+      DateTime? lastProgressUpdate;
+      var lastReportedProgress = -1.0;
+      var bytesSinceYield = 0;
 
-      final audioManifest = await fetchBestAudioStream(ytid);
-      if (session.cancelled) throw SongOfflineDownloadCancelled();
+      final progressInterval = Platform.isIOS
+          ? const Duration(milliseconds: 1500)
+          : const Duration(milliseconds: 800);
+      final progressStep = Platform.isIOS ? 0.08 : 0.05;
+      // Yield the event loop periodically so UI/audio stay responsive.
+      final yieldEveryBytes = Platform.isIOS ? 256 * 1024 : 512 * 1024;
 
-      if (audioManifest == null) {
-        logger.log('makeSongOffline: audioManifest is null for $ytid');
-        return false;
-      }
+      try {
+        if (session!.cancelled) throw SongOfflineDownloadCancelled();
 
-      final totalBytes = audioManifest.size.totalBytes;
-      var downloadedBytes = 0;
-      void reportProgress() {
-        final progress = totalBytes > 0
-            ? (downloadedBytes / totalBytes).clamp(0.0, 1.0)
-            : (1 - (1_000_000 / (downloadedBytes + 1_000_000)))
-                .clamp(0.0, 0.95);
-        _setSongDownloadProgress(ytid!, progress);
-        onProgress?.call(progress);
+        final audioManifest = await fetchBestAudioStream(ytid);
+        if (session.cancelled) throw SongOfflineDownloadCancelled();
 
-        if (notificationId != null) {
+        if (audioManifest == null) {
+          logger.log('makeSongOffline: audioManifest is null for $ytid');
+          return false;
+        }
+
+        final totalBytes = audioManifest.size.totalBytes;
+        var downloadedBytes = 0;
+
+        void publishProgress(double progress, {bool force = false}) {
           final now = DateTime.now();
-          if (lastNotifUpdate == null ||
-              now.difference(lastNotifUpdate!) >
-                  const Duration(milliseconds: 400)) {
-            lastNotifUpdate = now;
+          final jumped =
+              lastReportedProgress < 0 ||
+              (progress - lastReportedProgress).abs() >= progressStep;
+          final timedOut =
+              lastProgressUpdate == null ||
+              now.difference(lastProgressUpdate!) >= progressInterval;
+          if (!force && !jumped && !timedOut) return;
+
+          lastProgressUpdate = now;
+          lastReportedProgress = progress;
+          _setSongDownloadProgress(ytid!, progress);
+          onProgress?.call(progress);
+
+          if (notificationId != null) {
             unawaited(
               downloadNotificationService.updateSongDownload(
                 notificationId: notificationId,
@@ -1224,132 +1219,151 @@ Future<bool> makeSongOffline(
             );
           }
         }
+
+        final stream = ytClient.videos.streamsClient.get(audioManifest);
+        fileStream = audioFile.openWrite();
+        await for (final chunk in stream) {
+          if (session.cancelled) throw SongOfflineDownloadCancelled();
+          fileStream.add(chunk);
+          downloadedBytes += chunk.length;
+          bytesSinceYield += chunk.length;
+
+          final progress = totalBytes > 0
+              ? (downloadedBytes / totalBytes).clamp(0.0, 1.0)
+              : (1 - (1_000_000 / (downloadedBytes + 1_000_000))).clamp(
+                  0.0,
+                  0.95,
+                );
+          publishProgress(progress);
+
+          // Avoid busy-looping the isolate; respect pause between chunks.
+          if (bytesSinceYield >= yieldEveryBytes) {
+            bytesSinceYield = 0;
+            await Future<void>.delayed(Duration.zero);
+            await offlineDownloadCoordinator.waitWhilePaused();
+            if (session.cancelled) throw SongOfflineDownloadCancelled();
+          }
+        }
+        await fileStream.flush();
+        await fileStream.close();
+        fileStream = null;
+        publishProgress(1, force: true);
+      } on SongOfflineDownloadCancelled {
+        cancelled = true;
+        try {
+          await fileStream?.close();
+        } catch (_) {}
+        if (await audioFile.exists()) {
+          await audioFile.delete();
+        }
+        logger.log('makeSongOffline: cancelled download for $ytid');
+        return false;
+      } on RequestLimitExceededException catch (e, stackTrace) {
+        logger.log(
+          'makeSongOffline: rate limited for $ytid',
+          error: e,
+          stackTrace: stackTrace,
+        );
+        try {
+          await fileStream?.close();
+        } catch (_) {}
+        if (await audioFile.exists()) {
+          await audioFile.delete();
+        }
+        throw SongOfflineRateLimited();
+      } catch (e, stackTrace) {
+        logger.log(
+          'Error downloading audio file',
+          error: e,
+          stackTrace: stackTrace,
+        );
+        try {
+          await fileStream?.close();
+        } catch (_) {}
+        if (await audioFile.exists()) {
+          await audioFile.delete();
+        }
+        return false;
       }
 
-      final stream = ytClient.videos.streamsClient.get(audioManifest);
-      fileStream = audioFile.openWrite();
-      await for (final chunk in stream) {
-        if (session.cancelled) throw SongOfflineDownloadCancelled();
-        fileStream.add(chunk);
-        downloadedBytes += chunk.length;
-        reportProgress();
+      if (session.cancelled) {
+        cancelled = true;
+        if (await audioFile.exists()) {
+          await audioFile.delete();
+        }
+        return false;
       }
-      await fileStream.flush();
-      await fileStream.close();
-      fileStream = null;
-      _setSongDownloadProgress(ytid, 1);
-      onProgress?.call(1);
-    } on SongOfflineDownloadCancelled {
-      cancelled = true;
-      try {
-        await fileStream?.close();
-      } catch (_) {}
-      if (await audioFile.exists()) {
-        await audioFile.delete();
-      }
-      logger.log('makeSongOffline: cancelled download for $ytid');
-      return false;
-    } on RequestLimitExceededException catch (e, stackTrace) {
-      logger.log(
-        'makeSongOffline: rate limited for $ytid',
-        error: e,
-        stackTrace: stackTrace,
-      );
-      try {
-        await fileStream?.close();
-      } catch (_) {}
-      if (await audioFile.exists()) {
-        await audioFile.delete();
-      }
-      throw SongOfflineRateLimited();
-    } catch (e, stackTrace) {
-      logger.log(
-        'Error downloading audio file',
-        error: e,
-        stackTrace: stackTrace,
-      );
-      try {
-        await fileStream?.close();
-      } catch (_) {}
-      if (await audioFile.exists()) {
-        await audioFile.delete();
-      }
-      return false;
-    }
 
-    if (session.cancelled) {
-      cancelled = true;
-      if (await audioFile.exists()) {
-        await audioFile.delete();
-      }
-      return false;
-    }
+      try {
+        if (offlineSong['highResImage'] != null &&
+            offlineSong['highResImage'].toString().isNotEmpty) {
+          final _artworkFile = await _downloadAndSaveArtworkFile(
+            offlineSong['highResImage'],
+            artworkPath,
+          );
 
-    try {
-      if (offlineSong['highResImage'] != null &&
-          offlineSong['highResImage'].toString().isNotEmpty) {
-        final _artworkFile = await _downloadAndSaveArtworkFile(
-          offlineSong['highResImage'],
-          artworkPath,
+          if (_artworkFile != null && await _artworkFile.exists()) {
+            offlineSong['artworkPath'] = artworkPath;
+          } else {
+            logger.log(
+              'Artwork download failed or file does not exist for $ytid',
+            );
+            offlineSong['artworkPath'] = null;
+          }
+        }
+      } catch (e, stackTrace) {
+        logger.log(
+          'Error downloading artwork',
+          error: e,
+          stackTrace: stackTrace,
+        );
+        offlineSong['artworkPath'] = null;
+      }
+
+      offlineSong['audioPath'] = audioFile.path;
+      offlineSong['dateAdded'] = DateTime.now().millisecondsSinceEpoch;
+
+      // Normalize duration to integer seconds for MediaItem mapping.
+      final durationValue = offlineSong['duration'];
+      if (durationValue is Duration) {
+        offlineSong['duration'] = durationValue.inSeconds;
+      } else if (durationValue is num) {
+        offlineSong['duration'] = durationValue.round();
+      }
+
+      try {
+        final existingIndex = userOfflineSongs.value.indexWhere(
+          (s) => s['ytid'] == ytid,
         );
 
-        if (_artworkFile != null && await _artworkFile.exists()) {
-          offlineSong['artworkPath'] = artworkPath;
+        final updatedOfflineSongs = List.from(userOfflineSongs.value);
+        if (existingIndex != -1) {
+          updatedOfflineSongs[existingIndex] = offlineSong;
         } else {
-          logger.log(
-            'Artwork download failed or file does not exist for $ytid',
-          );
-          offlineSong['artworkPath'] = null;
+          updatedOfflineSongs.add(offlineSong);
         }
+        userOfflineSongs.value = updatedOfflineSongs;
+
+        unawaited(
+          addOrUpdateData<List>(
+            'userNoBackup',
+            'offlineSongs',
+            userOfflineSongs.value,
+          ),
+        );
+      } catch (e, st) {
+        logger.log(
+          'Error updating global offline songs list',
+          error: e,
+          stackTrace: st,
+        );
       }
-    } catch (e, stackTrace) {
-      logger.log('Error downloading artwork', error: e, stackTrace: stackTrace);
-      offlineSong['artworkPath'] = null;
-    }
 
-    offlineSong['audioPath'] = audioFile.path;
-    offlineSong['dateAdded'] = DateTime.now().millisecondsSinceEpoch;
+      unawaited(cacheLyricsForOfflineSong(offlineSong));
 
-    // Normalize duration to integer seconds for MediaItem mapping.
-    final durationValue = offlineSong['duration'];
-    if (durationValue is Duration) {
-      offlineSong['duration'] = durationValue.inSeconds;
-    } else if (durationValue is num) {
-      offlineSong['duration'] = durationValue.round();
-    }
-
-    try {
-      final existingIndex = userOfflineSongs.value.indexWhere(
-        (s) => s['ytid'] == ytid,
-      );
-
-      final updatedOfflineSongs = List.from(userOfflineSongs.value);
-      if (existingIndex != -1) {
-        updatedOfflineSongs[existingIndex] = offlineSong;
-      } else {
-        updatedOfflineSongs.add(offlineSong);
-      }
-      userOfflineSongs.value = updatedOfflineSongs;
-
-      unawaited(
-        addOrUpdateData<List>(
-          'userNoBackup',
-          'offlineSongs',
-          userOfflineSongs.value,
-        ),
-      );
-    } catch (e, st) {
-      logger.log(
-        'Error updating global offline songs list',
-        error: e,
-        stackTrace: st,
-      );
-    }
-
-    unawaited(cacheLyricsForOfflineSong(offlineSong));
-
-    success = true;
-    return true;
+      success = true;
+      return true;
+    });
   } on SongOfflineRateLimited {
     rethrow;
   } catch (e, stackTrace) {

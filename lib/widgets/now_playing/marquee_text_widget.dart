@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'package:flutter/material.dart';
 import 'package:wiyamusic/widgets/marquee.dart';
 
@@ -29,11 +8,13 @@ class MarqueeTextWidget extends StatelessWidget {
     required this.fontColor,
     required this.fontSize,
     required this.fontWeight,
+    this.textAlign = TextAlign.start,
   });
   final String text;
   final Color fontColor;
   final double fontSize;
   final FontWeight fontWeight;
+  final TextAlign textAlign;
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +22,7 @@ class MarqueeTextWidget extends StatelessWidget {
       backDuration: const Duration(seconds: 1),
       child: Text(
         text,
+        textAlign: textAlign,
         style: TextStyle(
           fontSize: fontSize,
           fontWeight: fontWeight,

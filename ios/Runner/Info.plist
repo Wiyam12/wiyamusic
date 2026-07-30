@@ -47,6 +47,12 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>WiyaMusic may use the camera when you choose a photo for custom playlist artwork.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>WiyaMusic does not use your location. This permission may be requested by a photo-picker library included for selecting playlist artwork.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>WiyaMusic may save images when sharing song cards or playlist artwork.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>WiyaMusic needs photo library access to set custom playlist artwork.</string>
 	<key>UIApplicationSceneManifest</key>

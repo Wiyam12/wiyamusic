@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:async';
 
 import 'package:animated_icon/animated_icon.dart';
@@ -31,11 +10,13 @@ import 'package:simple_clean_navbar/simple_clean_navbar.dart';
 import 'package:wiyamusic/constants/app_constants.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/theme/design_tokens.dart';
 import 'package:wiyamusic/utilities/flutter_bottom_sheet.dart'
     show closeCurrentBottomSheet;
 import 'package:wiyamusic/utilities/flutter_toast.dart';
+import 'package:wiyamusic/widgets/app_navigation_sidebar.dart';
 import 'package:wiyamusic/widgets/mini_player.dart';
 import 'package:wiyamusic/widgets/wiya_animated_icon.dart';
 
@@ -109,9 +90,12 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
 
           return LayoutBuilder(
             builder: (context, constraints) {
-              final isLargeScreen = MediaQuery.sizeOf(context).width >= 600;
+              final isTabletLayout =
+                  MediaQuery.sizeOf(context).width >=
+                  tabletNavigationBreakpoint;
               final colorScheme = Theme.of(context).colorScheme;
               final items = _getNavigationItems(isOfflineMode);
+              final selectedIndex = _getCurrentIndex(items, isOfflineMode);
 
               return Scaffold(
                 // Keep the floating nav / mini player pinned to the screen
@@ -119,32 +103,36 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                 resizeToAvoidBottomInset: false,
                 body: SafeArea(
                   bottom: false,
+                  left: !isTabletLayout,
                   child: Row(
                     children: [
-                      if (isLargeScreen)
-                        NavigationRail(
-                          labelType: NavigationRailLabelType.selected,
-                          destinations: items
-                              .map(
-                                (item) => NavigationRailDestination(
-                                  icon: WiyaAnimatedIcon(
-                                    icon: item.animatedIcon,
-                                    size: 26,
-                                    color: colorScheme.onSurfaceVariant,
-                                    iconType: IconType.onlyIcon,
-                                  ),
-                                  selectedIcon: WiyaAnimatedIcon(
-                                    icon: item.animatedIcon,
-                                    size: 28,
-                                    color: colorScheme.primary,
-                                  ),
-                                  label: Text(item.label),
-                                ),
-                              )
-                              .toList(),
-                          selectedIndex: _getCurrentIndex(items, isOfflineMode),
-                          onDestinationSelected: (index) =>
-                              _onTabTapped(index, items),
+                      if (isTabletLayout)
+                        AppNavigationSidebar(
+                          isOfflineMode: isOfflineMode,
+                          primarySelectedShellIndex: widget.child.currentIndex,
+                          onPrimaryTabSelected: (shellIndex) {
+                            final items = _getNavigationItems(isOfflineMode);
+                            final uiIndex = items.indexWhere(
+                              (item) => item.shellIndex == shellIndex,
+                            );
+                            if (uiIndex != -1) {
+                              _onTabTapped(uiIndex, items);
+                            } else {
+                              closeCurrentBottomSheet();
+                              widget.child.goBranch(shellIndex);
+                            }
+                          },
+                          onNavigate: (route, {extra, shellIndex = 2}) {
+                            closeCurrentBottomSheet();
+                            if (widget.child.currentIndex != shellIndex) {
+                              widget.child.goBranch(shellIndex);
+                            }
+                            if (extra != null) {
+                              NavigationManager.router.go(route, extra: extra);
+                            } else {
+                              NavigationManager.router.go(route);
+                            }
+                          },
                         ),
                       Expanded(
                         child: StreamBuilder<bool>(
@@ -156,7 +144,7 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                             final safeBottom = mediaQuery.padding.bottom;
                             final bottomPadding = _contentBottomPadding(
                               safeBottom: safeBottom,
-                              isLargeScreen: isLargeScreen,
+                              isTabletLayout: isTabletLayout,
                               isMiniPlayerVisible: isMiniPlayerVisible,
                             );
 
@@ -178,10 +166,15 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                                 ),
                                 if (isMiniPlayerVisible)
                                   Positioned(
-                                    left: 8,
-                                    right: 8,
-                                    bottom: isLargeScreen
-                                        ? safeBottom
+                                    left: isTabletLayout
+                                        ? miniPlayerTabletHorizontalMargin
+                                        : 8,
+                                    right: isTabletLayout
+                                        ? miniPlayerTabletHorizontalMargin
+                                        : 8,
+                                    bottom: isTabletLayout
+                                        ? safeBottom +
+                                              miniPlayerTabletBottomMargin
                                         : _floatingNavOccupiedHeight(8) +
                                               floatingNavMiniPlayerGap,
                                     child: MediaQuery(
@@ -189,14 +182,15 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
                                       child: const MiniPlayer(),
                                     ),
                                   ),
-                                if (!isLargeScreen)
+                                if (!isTabletLayout)
                                   MediaQuery(
                                     data: chromeMediaQuery,
                                     child: Padding(
                                       padding: const EdgeInsets.only(bottom: 6),
                                       child: _buildFloatingNavBar(
                                         items: items,
-                                        isOfflineMode: isOfflineMode,
+                                        selectedIndex: selectedIndex,
+                                        colorScheme: colorScheme,
                                       ),
                                     ),
                                   ),
@@ -223,12 +217,12 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
 
   double _contentBottomPadding({
     required double safeBottom,
-    required bool isLargeScreen,
+    required bool isTabletLayout,
     required bool isMiniPlayerVisible,
   }) {
-    if (isLargeScreen) {
+    if (isTabletLayout) {
       return isMiniPlayerVisible
-          ? safeBottom + miniPlayerTotalHeight
+          ? safeBottom + miniPlayerTabletTotalHeight
           : safeBottom;
     }
 
@@ -242,13 +236,13 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
 
   Widget _buildFloatingNavBar({
     required List<_NavigationItem> items,
-    required bool isOfflineMode,
+    required int selectedIndex,
+    required ColorScheme colorScheme,
   }) {
-    final colorScheme = Theme.of(context).colorScheme;
     final onlyShowSelectedLabels = languageSetting == const Locale('en', '');
 
     return SimpleCleanNavBar.advanced(
-      currentIndex: _getCurrentIndex(items, isOfflineMode),
+      currentIndex: selectedIndex,
       onTap: (index) => _onTabTapped(index, items),
       items: items
           .map(

@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -175,13 +154,17 @@ class NavigationManager {
               ),
               GoRoute(
                 path: 'playlist/:playlistId',
-                pageBuilder: (context, state) => _pushPage(
-                  child: PlaylistPage(
-                    playlistId: state.pathParameters['playlistId'],
-                    playlistData: _extraAsMap(state.extra),
-                  ),
-                  state: state,
-                ),
+                pageBuilder: (context, state) {
+                  final playlistId = state.pathParameters['playlistId'];
+                  return _pushPage(
+                    child: PlaylistPage(
+                      key: ValueKey('home-playlist-$playlistId'),
+                      playlistId: playlistId,
+                      playlistData: _extraAsMap(state.extra),
+                    ),
+                    state: state,
+                  );
+                },
               ),
               GoRoute(
                 path: 'artist/:artistId',
@@ -231,13 +214,17 @@ class NavigationManager {
             routes: [
               GoRoute(
                 path: 'playlist/:playlistId',
-                pageBuilder: (context, state) => _pushPage(
-                  child: PlaylistPage(
-                    playlistId: state.pathParameters['playlistId'],
-                    playlistData: _extraAsMap(state.extra),
-                  ),
-                  state: state,
-                ),
+                pageBuilder: (context, state) {
+                  final playlistId = state.pathParameters['playlistId'];
+                  return _pushPage(
+                    child: PlaylistPage(
+                      key: ValueKey('search-playlist-$playlistId'),
+                      playlistId: playlistId,
+                      playlistData: _extraAsMap(state.extra),
+                    ),
+                    state: state,
+                  );
+                },
               ),
               GoRoute(
                 path: 'artist/:artistId',
@@ -304,13 +291,17 @@ class NavigationManager {
               ),
               GoRoute(
                 path: 'playlist/:playlistId',
-                pageBuilder: (context, state) => _pushPage(
-                  child: UserCreatedPlaylistPage(
-                    playlistId: state.pathParameters['playlistId'],
-                    playlistData: _extraAsMap(state.extra),
-                  ),
-                  state: state,
-                ),
+                pageBuilder: (context, state) {
+                  final playlistId = state.pathParameters['playlistId'];
+                  return _pushPage(
+                    child: UserCreatedPlaylistPage(
+                      key: ValueKey('library-playlist-$playlistId'),
+                      playlistId: playlistId,
+                      playlistData: _extraAsMap(state.extra),
+                    ),
+                    state: state,
+                  );
+                },
               ),
               GoRoute(
                 path: 'folder/:folderId/:folderName',

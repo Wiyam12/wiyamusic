@@ -1,28 +1,8 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:wiyamusic/main.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/widgets/now_playing/bottom_actions_row.dart';
 import 'package:wiyamusic/widgets/now_playing/now_playing_artwork.dart';
 import 'package:wiyamusic/widgets/now_playing/now_playing_controls.dart';
@@ -52,12 +32,18 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final screenWidth = size.width;
-    final baseIconSize = screenWidth < 360
+    final baseIconSize = isLargeScreen
+        ? 52.0
+        : screenWidth < 360
         ? 28.0
         : screenWidth < 400
         ? 32.0
         : 36.0;
-    final miniIconSize = screenWidth < 360 ? 22.0 : 24.0;
+    final miniIconSize = isLargeScreen
+        ? 34.0
+        : screenWidth < 360
+        ? 22.0
+        : 24.0;
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -166,50 +152,75 @@ class _DesktopLayout extends StatelessWidget {
   final double adjustedMiniIconSize;
   final NowPlayingLyricsController lyricsController;
 
+  static const double _queueMinWidth = 280;
+  static const double _queueMaxWidth = 420;
+  static const Duration _queueSlideDuration = Duration(milliseconds: 320);
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            children: [
-              Expanded(
-                flex: 5,
-                child: NowPlayingArtwork(
-                  size: size,
-                  metadata: metadata,
-                  lyricsController: lyricsController,
-                ),
-              ),
-              if (!(metadata.extras?['isLive'] ?? false))
-                Expanded(
-                  flex: 4,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                    child: NowPlayingControls(
+    final queueWidth = (size.width * 0.38).clamp(
+      _queueMinWidth,
+      _queueMaxWidth,
+    );
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: nowPlayingQueueVisible,
+      builder: (context, queueVisible, _) {
+        return Row(
+          children: [
+            Expanded(
+              child: Column(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: NowPlayingArtwork(
                       size: size,
-                      audioId: metadata.extras?['ytid'],
-                      adjustedIconSize: adjustedIconSize,
-                      adjustedMiniIconSize: adjustedMiniIconSize,
                       metadata: metadata,
+                      lyricsController: lyricsController,
                     ),
                   ),
-                ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: BottomActionsRow(
-                  metadata: metadata,
-                  iconSize: adjustedMiniIconSize,
-                  isLargeScreen: true,
-                  lyricsController: lyricsController,
-                ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 48),
+                      child: Column(
+                        children: [
+                          if (!(metadata.extras?['isLive'] ?? false))
+                            Expanded(
+                              child: NowPlayingControls(
+                                size: size,
+                                audioId: metadata.extras?['ytid'],
+                                adjustedIconSize: adjustedIconSize,
+                                adjustedMiniIconSize: adjustedMiniIconSize,
+                                metadata: metadata,
+                              ),
+                            ),
+                          BottomActionsRow(
+                            metadata: metadata,
+                            iconSize: 26,
+                            isLargeScreen: true,
+                            lyricsController: lyricsController,
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 20),
-            ],
-          ),
-        ),
-        const Expanded(child: QueueWidget()),
-      ],
+            ),
+            ClipRect(
+              child: AnimatedAlign(
+                duration: _queueSlideDuration,
+                curve: Curves.easeInOutCubic,
+                alignment: Alignment.centerLeft,
+                widthFactor: queueVisible ? 1 : 0,
+                heightFactor: 1,
+                child: SizedBox(width: queueWidth, child: const QueueWidget()),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

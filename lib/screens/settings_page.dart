@@ -1,23 +1,4 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
+import 'dart:io';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/cupertino.dart';
@@ -34,8 +15,7 @@ import 'package:wiyamusic/services/playlist_download_service.dart';
 import 'package:wiyamusic/services/playlists_manager.dart';
 import 'package:wiyamusic/services/router_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
-// Unused while manual/auto app-update settings are hidden from end users.
-// import 'package:wiyamusic/services/update_manager.dart';
+import 'package:wiyamusic/services/update_manager.dart';
 // Unused while the accent color picker is hidden from end users.
 // import 'package:wiyamusic/theme/app_colors.dart';
 import 'package:wiyamusic/theme/app_themes.dart';
@@ -390,7 +370,9 @@ class SettingsPage extends StatelessWidget {
           context.l10n!.restoreUserData,
           FluentIcons.cloud_add_24_regular,
           showDivider: true,
-          borderRadius: commonCustomBarRadiusLast,
+          borderRadius: (!isFdroidBuild && Platform.isAndroid)
+              ? BorderRadius.zero
+              : commonCustomBarRadiusLast,
           onTap: () async {
             try {
               final result = await restoreData(context);
@@ -433,16 +415,13 @@ class SettingsPage extends StatelessWidget {
             }
           },
         ),
-        // Manual "Download app update" hidden from most end users.
-        /*
         if (!isFdroidBuild && Platform.isAndroid)
           CustomBar(
-            context.l10n!.downloadAppUpdate,
-            FluentIcons.arrow_download_24_regular,
+            context.l10n!.checkUpdates,
+            FluentIcons.arrow_sync_24_regular,
             borderRadius: commonCustomBarRadiusLast,
-            onTap: checkAppUpdates,
+            onTap: () => checkAppUpdates(manual: true),
           ),
-        */
       ],
     );
   }

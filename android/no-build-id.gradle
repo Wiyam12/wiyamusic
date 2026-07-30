@@ -1,4 +1,3 @@
-// MIT License - Copyright (c) 2026 Simple Badminton Contributors
 // Direct run: ./gradlew assembleRelease --no-daemon --init-script no-build-id.gradle
 // Verification of '.note.gnu.build-id' removal: readelf --wide --notes libdartjni.so
 

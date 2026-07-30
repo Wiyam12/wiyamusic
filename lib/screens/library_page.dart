@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -64,6 +43,36 @@ class _LibraryPageState extends State<LibraryPage> {
   static const int _overviewCardLimit = 12;
   static const double _overviewCardWidth = 112;
   static const double _overviewRailHeight = 160;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncFilterFromRoute();
+  }
+
+  void _syncFilterFromRoute() {
+    final section = GoRouterState.of(context).uri.queryParameters['section'];
+    final next = switch (section) {
+      'playlists' => _LibraryFilter.playlists,
+      'songs' => _LibraryFilter.songs,
+      'albums' => _LibraryFilter.albums,
+      'artists' => _LibraryFilter.artists,
+      _ => null,
+    };
+    if (_filter != next) {
+      setState(() => _filter = next);
+    }
+  }
+
+  void _selectFilter(_LibraryFilter filter) {
+    final next = _filter == filter ? null : filter;
+    setState(() => _filter = next);
+    if (next == null) {
+      context.go('/library');
+    } else {
+      context.go('/library?section=${next.name}');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -195,11 +204,7 @@ class _LibraryPageState extends State<LibraryPage> {
                       padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
                       child: _LibraryFilterChips(
                         selected: _filter,
-                        onSelected: (filter) {
-                          setState(() {
-                            _filter = _filter == filter ? null : filter;
-                          });
-                        },
+                        onSelected: _selectFilter,
                       ),
                     ),
                   ],
@@ -325,7 +330,7 @@ class _LibraryPageState extends State<LibraryPage> {
                       offlineOnly: offlineMode.value,
                     ).isEmpty
                     ? null
-                    : () => setState(() => _filter = _LibraryFilter.playlists),
+                    : () => context.go('/library?section=playlists'),
                 onOpen: _openPlaylistOrArtist,
               ),
               _OverviewPlaylistRail(
@@ -342,7 +347,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 subtitleBuilder: (_) => context.l10n!.album,
                 onSeeAll: albums.isEmpty
                     ? null
-                    : () => setState(() => _filter = _LibraryFilter.albums),
+                    : () => context.go('/library?section=albums'),
                 onOpen: _openPlaylistOrArtist,
               ),
               _OverviewPlaylistRail(
@@ -364,7 +369,7 @@ class _LibraryPageState extends State<LibraryPage> {
                     normalizeArtistThumbnailUrl(item['image']?.toString()),
                 onSeeAll: artists.isEmpty
                     ? null
-                    : () => setState(() => _filter = _LibraryFilter.artists),
+                    : () => context.go('/library?section=artists'),
                 onOpen: _openPlaylistOrArtist,
               ),
             ],
@@ -1263,10 +1268,7 @@ class _OverviewSongRail extends StatelessWidget {
         : queue.indexWhere((s) => s['ytid']?.toString() == ytid);
     final source =
         playbackContext ??
-        PlaybackContext.singleSong(
-          id: ytid,
-          title: song['title']?.toString(),
-        );
+        PlaybackContext.singleSong(id: ytid, title: song['title']?.toString());
 
     if (source.isLibraryCollection || queue.length > 1) {
       audioHandler.playPlaylistSong(

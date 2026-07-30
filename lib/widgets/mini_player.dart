@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -28,11 +7,16 @@ import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:wiyamusic/constants/app_constants.dart';
+import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/main.dart';
 import 'package:wiyamusic/models/full_player_state.dart';
 import 'package:wiyamusic/models/position_data.dart';
 import 'package:wiyamusic/screens/now_playing_page.dart';
+import 'package:wiyamusic/services/common_services.dart';
+import 'package:wiyamusic/services/settings_manager.dart';
 import 'package:wiyamusic/theme/design_tokens.dart';
+import 'package:wiyamusic/utilities/mediaitem.dart';
 import 'package:wiyamusic/widgets/marquee.dart';
 import 'package:wiyamusic/widgets/song_artwork.dart';
 import 'package:wiyamusic/widgets/wiya_animated_icon.dart';
@@ -63,6 +47,8 @@ class MiniPlayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final showExtendedControls =
+        MediaQuery.sizeOf(context).width >= tabletNavigationBreakpoint;
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 300),
@@ -84,11 +70,17 @@ class MiniPlayer extends StatelessWidget {
                   (state.playbackState.queueIndex ?? 0) <
                       state.queue.length - 1;
 
-              return _MiniPlayerBody(
-                colorScheme: colorScheme,
-                metadata: metadata,
-                state: state,
-                hasNext: hasNext,
+              return Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: showExtendedControls ? 30 : 0,
+                ),
+                child: _MiniPlayerBody(
+                  colorScheme: colorScheme,
+                  metadata: metadata,
+                  state: state,
+                  hasNext: hasNext,
+                  showExtendedControls: showExtendedControls,
+                ),
               );
             },
           );
@@ -104,12 +96,14 @@ class _MiniPlayerBody extends StatefulWidget {
     required this.metadata,
     required this.state,
     required this.hasNext,
+    required this.showExtendedControls,
   });
 
   final ColorScheme colorScheme;
   final MediaItem metadata;
   final FullPlayerState state;
   final bool hasNext;
+  final bool showExtendedControls;
 
   @override
   State<_MiniPlayerBody> createState() => _MiniPlayerBodyState();
@@ -239,7 +233,9 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                         fillOpacity: 0.62,
                         withGlow: true,
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: widget.showExtendedControls ? 16 : 10,
+                      ),
                       child: Row(
                         children: [
                           _ArtworkWidget(metadata: metadata),
@@ -273,9 +269,12 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                           ),
                           _ControlsWidget(
                             colorScheme: colorScheme,
+                            metadata: metadata,
                             playbackState: state.playbackState,
                             hasNext: widget.hasNext,
                             progress: progress,
+                            showExtendedControls: widget.showExtendedControls,
+                            queue: state.queue,
                           ),
                         ],
                       ),
@@ -527,15 +526,21 @@ class _MetadataWidget extends StatelessWidget {
 class _ControlsWidget extends StatelessWidget {
   const _ControlsWidget({
     required this.colorScheme,
+    required this.metadata,
     required this.playbackState,
     required this.hasNext,
     required this.progress,
+    required this.showExtendedControls,
+    required this.queue,
   });
 
   final ColorScheme colorScheme;
+  final MediaItem metadata;
   final PlaybackState playbackState;
   final bool hasNext;
   final double progress;
+  final bool showExtendedControls;
+  final List<MediaItem> queue;
 
   @override
   Widget build(BuildContext context) {
@@ -544,7 +549,16 @@ class _ControlsWidget extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (isPlaying) ...[
+        if (showExtendedControls) ...[
+          _MiniLikeButton(
+            key: ValueKey('mini-like-${metadata.id}'),
+            metadata: metadata,
+            colorScheme: colorScheme,
+          ),
+          _MiniShuffleButton(colorScheme: colorScheme),
+          _MiniRepeatButton(colorScheme: colorScheme, queue: queue),
+          const SizedBox(width: 4),
+        ] else if (isPlaying) ...[
           WiyaAnimatedIcon(
             icon: AnimateIcons.activity,
             size: 22,
@@ -572,6 +586,214 @@ class _ControlsWidget extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _MiniLikeButton extends StatefulWidget {
+  const _MiniLikeButton({
+    super.key,
+    required this.metadata,
+    required this.colorScheme,
+  });
+
+  final MediaItem metadata;
+  final ColorScheme colorScheme;
+
+  @override
+  State<_MiniLikeButton> createState() => _MiniLikeButtonState();
+}
+
+class _MiniLikeButtonState extends State<_MiniLikeButton> {
+  late final ValueNotifier<bool> _songLikeStatus;
+
+  bool get _isRadioStation => widget.metadata.extras?['isLive'] == true;
+
+  String? get _audioId {
+    if (_isRadioStation) return widget.metadata.id;
+    final ytid = widget.metadata.extras?['ytid']?.toString().trim();
+    if (ytid != null && ytid.isNotEmpty) return ytid;
+    return widget.metadata.id;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isRadioStation) {
+      _songLikeStatus = ValueNotifier(isRadioStationLiked(_audioId ?? ''));
+      userLikedRadioStations.addListener(_syncRadioLikeStatus);
+    } else {
+      _songLikeStatus = ValueNotifier(isSongAlreadyLiked(_audioId));
+      userLikedSongsList.addListener(_syncLikeStatus);
+    }
+  }
+
+  void _syncLikeStatus() {
+    final newStatus = isSongAlreadyLiked(_audioId);
+    if (_songLikeStatus.value != newStatus) {
+      _songLikeStatus.value = newStatus;
+    }
+  }
+
+  void _syncRadioLikeStatus() {
+    final newStatus = isRadioStationLiked(_audioId ?? '');
+    if (_songLikeStatus.value != newStatus) {
+      _songLikeStatus.value = newStatus;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _MiniLikeButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.metadata.id != widget.metadata.id) {
+      if (_isRadioStation) {
+        _songLikeStatus.value = isRadioStationLiked(_audioId ?? '');
+      } else {
+        _songLikeStatus.value = isSongAlreadyLiked(_audioId);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_isRadioStation) {
+      userLikedRadioStations.removeListener(_syncRadioLikeStatus);
+    } else {
+      userLikedSongsList.removeListener(_syncLikeStatus);
+    }
+    _songLikeStatus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (offlineMode.value) return const SizedBox.shrink();
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: _songLikeStatus,
+      builder: (_, isLiked, __) {
+        return IconButton(
+          onPressed: () async {
+            final id = _audioId;
+            if (id == null) return;
+
+            final originalValue = _songLikeStatus.value;
+            _songLikeStatus.value = !originalValue;
+
+            try {
+              if (_isRadioStation) {
+                if (originalValue) {
+                  await removeRadioStationFromLiked(id);
+                } else {
+                  await addRadioStationToLiked(id);
+                }
+              } else {
+                await updateSongLikeStatus(
+                  id,
+                  !originalValue,
+                  songData: mediaItemToMap(widget.metadata),
+                );
+              }
+            } catch (e) {
+              _songLikeStatus.value = originalValue;
+              logger.log('Error toggling like status', error: e);
+            }
+          },
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          tooltip: context.l10n!.likedSongs,
+          icon: Icon(
+            isLiked
+                ? FluentIcons.heart_24_filled
+                : FluentIcons.heart_24_regular,
+            color: isLiked
+                ? widget.colorScheme.primary
+                : widget.colorScheme.onSurfaceVariant,
+            size: 22,
+          ),
+          visualDensity: VisualDensity.compact,
+        );
+      },
+    );
+  }
+}
+
+class _MiniShuffleButton extends StatelessWidget {
+  const _MiniShuffleButton({required this.colorScheme});
+
+  final ColorScheme colorScheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: shuffleNotifier,
+      builder: (_, value, __) {
+        return IconButton(
+          onPressed: () {
+            audioHandler.setShuffleMode(
+              value
+                  ? AudioServiceShuffleMode.none
+                  : AudioServiceShuffleMode.all,
+            );
+          },
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          tooltip: context.l10n!.shuffle,
+          icon: Icon(
+            FluentIcons.arrow_shuffle_24_regular,
+            color: value ? colorScheme.primary : colorScheme.onSurfaceVariant,
+            size: 22,
+          ),
+          visualDensity: VisualDensity.compact,
+        );
+      },
+    );
+  }
+}
+
+class _MiniRepeatButton extends StatelessWidget {
+  const _MiniRepeatButton({required this.colorScheme, required this.queue});
+
+  final ColorScheme colorScheme;
+  final List<MediaItem> queue;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<AudioServiceRepeatMode>(
+      valueListenable: repeatNotifier,
+      builder: (_, repeatMode, __) {
+        final isActive = repeatMode != AudioServiceRepeatMode.none;
+
+        return IconButton(
+          onPressed: () {
+            final AudioServiceRepeatMode newMode;
+            if (repeatMode == AudioServiceRepeatMode.none) {
+              newMode = queue.length <= 1
+                  ? AudioServiceRepeatMode.one
+                  : AudioServiceRepeatMode.all;
+            } else if (repeatMode == AudioServiceRepeatMode.all) {
+              newMode = AudioServiceRepeatMode.one;
+            } else {
+              newMode = AudioServiceRepeatMode.none;
+            }
+            repeatNotifier.value = newMode;
+            audioHandler.setRepeatMode(newMode);
+          },
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          tooltip: context.l10n!.repeat,
+          icon: Icon(
+            repeatMode == AudioServiceRepeatMode.one
+                ? FluentIcons.arrow_repeat_1_24_regular
+                : FluentIcons.arrow_repeat_all_24_regular,
+            color: isActive
+                ? colorScheme.primary
+                : colorScheme.onSurfaceVariant,
+            size: 22,
+          ),
+          visualDensity: VisualDensity.compact,
+        );
+      },
     );
   }
 }

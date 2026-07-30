@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -139,6 +118,27 @@ class _PlaylistPageState extends State<PlaylistPage> {
     _searchFocusNode = FocusNode();
     userLikedPlaylists.addListener(_syncPlaylistLikeStatus);
     _initializePlaylist();
+  }
+
+  @override
+  void didUpdateWidget(covariant PlaylistPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldId =
+        oldWidget.playlistId ?? oldWidget.playlistData?['ytid']?.toString();
+    final newId =
+        widget.playlistId ?? widget.playlistData?['ytid']?.toString();
+    if (oldId == newId && oldWidget.isArtist == widget.isArtist) {
+      return;
+    }
+
+    // Same route pattern, different playlist (common on tablet sidebar).
+    _isInitializingPlaylist = true;
+    _searchQueryNotifier.value = '';
+    _searchController.clear();
+    _sampledImageUrl = null;
+    _headerExpandProgress = 1;
+    playlistLikeStatus.value = isPlaylistAlreadyLiked(newId);
+    unawaited(_initializePlaylist());
   }
 
   @override

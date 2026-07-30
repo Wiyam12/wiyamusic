@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2026 Valeri Gokadze
- *
- *     WiyaMusic is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     WiyaMusic is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about WiyaMusic, including how to contribute,
- *     please visit: https://github.com/Wiyam12/wiyamusic
- */
-
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
@@ -65,45 +44,94 @@ class NowPlayingControls extends StatelessWidget {
       builder: (context, constraints) {
         final availableHeight = constraints.maxHeight;
         final isCompact = availableHeight < 280;
-        final isVeryCompact = availableHeight < 200;
+        final isVeryCompact = availableHeight < 220;
 
-        final spacing = isVeryCompact
+        final spacing = isDesktop
+            ? (isVeryCompact
+                  ? 6.0
+                  : isCompact
+                  ? 10.0
+                  : 16.0)
+            : isVeryCompact
             ? 6.0
             : isCompact
             ? 10.0
             : 16.0;
-        final iconScale = isVeryCompact
-            ? 0.75
+        // Scale hard in the short iPad control strip so play/repeat never overflow.
+        final iconScale = isDesktop
+            ? (isVeryCompact
+                  ? 0.55
+                  : isCompact
+                  ? 0.68
+                  : 0.85)
+            : isVeryCompact
+            ? 0.7
             : isCompact
-            ? 0.85
+            ? 0.82
             : 1.0;
-        final fontScale = isCompact ? 0.92 : 1.0;
+        final fontScale = isDesktop
+            ? (isVeryCompact
+                  ? 0.72
+                  : isCompact
+                  ? 0.8
+                  : 0.9)
+            : isVeryCompact
+            ? 0.85
+            : isCompact
+            ? 0.9
+            : 1.0;
+        final controlsMaxWidth = isDesktop
+            ? (constraints.maxWidth * 0.72).clamp(420.0, 560.0)
+            : constraints.maxWidth;
+        final likeSize = isDesktop
+            ? (isVeryCompact ? 22.0 : isCompact ? 26.0 : 30.0)
+            : 26.0;
 
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        final panel = Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _SongMetaRow(
-              metadata: metadata,
-              titleFontSize: titleFontSize * fontScale,
-              artistFontSize: artistFontSize * fontScale,
-              canOpenArtist: canOpenArtist,
-              onArtistTap: () => _openArtistPage(context, metadata),
-              colorScheme: colorScheme,
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: controlsMaxWidth),
+              child: _SongMetaRow(
+                metadata: metadata,
+                titleFontSize: titleFontSize * fontScale,
+                artistFontSize: artistFontSize * fontScale,
+                canOpenArtist: canOpenArtist,
+                onArtistTap: () => _openArtistPage(context, metadata),
+                colorScheme: colorScheme,
+                centered: isDesktop,
+                likeIconSize: likeSize,
+              ),
             ),
             SizedBox(height: spacing),
             ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: isDesktop ? 420 : constraints.maxWidth,
+              constraints: BoxConstraints(maxWidth: controlsMaxWidth),
+              child: PositionSlider(
+                largeControls: isDesktop && !isVeryCompact,
               ),
-              child: const PositionSlider(),
             ),
             SizedBox(height: spacing * 0.75),
-            PlayerControlButtons(
-              metadata: metadata,
-              iconSize: adjustedIconSize * iconScale,
-              miniIconSize: adjustedMiniIconSize * iconScale,
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: controlsMaxWidth),
+              child: PlayerControlButtons(
+                metadata: metadata,
+                iconSize: adjustedIconSize * iconScale,
+                miniIconSize: adjustedMiniIconSize * iconScale,
+                centered: isDesktop,
+                controlGap: isDesktop ? (isVeryCompact ? 8 : 14) : 0,
+              ),
             ),
           ],
+        );
+
+        return ClipRect(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: SizedBox(
+              width: controlsMaxWidth,
+              child: panel,
+            ),
+          ),
         );
       },
     );
@@ -181,6 +209,8 @@ class _SongMetaRow extends StatelessWidget {
     required this.canOpenArtist,
     required this.onArtistTap,
     required this.colorScheme,
+    this.centered = false,
+    this.likeIconSize = 26,
   });
 
   final MediaItem metadata;
@@ -189,9 +219,50 @@ class _SongMetaRow extends StatelessWidget {
   final bool canOpenArtist;
   final VoidCallback onArtistTap;
   final ColorScheme colorScheme;
+  final bool centered;
+  final double likeIconSize;
 
   @override
   Widget build(BuildContext context) {
+    if (centered) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: MarqueeTextWidget(
+                  text: metadata.title,
+                  fontColor: colorScheme.onSurface,
+                  fontSize: titleFontSize,
+                  fontWeight: FontWeight.w700,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(width: 6),
+              _OfflineDownloadIndicator(metadata: metadata),
+              _LikeButton(metadata: metadata, iconSize: likeIconSize),
+            ],
+          ),
+          if (metadata.artist != null) ...[
+            const SizedBox(height: 6),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: canOpenArtist ? onArtistTap : null,
+              child: MarqueeTextWidget(
+                text: metadata.artist!,
+                fontColor: colorScheme.onSurfaceVariant,
+                fontSize: artistFontSize,
+                fontWeight: FontWeight.w500,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
     return Row(
       children: [
         Expanded(
@@ -222,7 +293,7 @@ class _SongMetaRow extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         _OfflineDownloadIndicator(metadata: metadata),
-        _LikeButton(metadata: metadata),
+        _LikeButton(metadata: metadata, iconSize: likeIconSize),
       ],
     );
   }
@@ -337,9 +408,10 @@ class _OfflineDownloadIndicatorState extends State<_OfflineDownloadIndicator> {
 }
 
 class _LikeButton extends StatefulWidget {
-  const _LikeButton({required this.metadata});
+  const _LikeButton({required this.metadata, this.iconSize = 26});
 
   final MediaItem metadata;
+  final double iconSize;
 
   @override
   State<_LikeButton> createState() => _LikeButtonState();
@@ -422,11 +494,9 @@ class _LikeButtonState extends State<_LikeButton> {
             isLiked
                 ? FluentIcons.heart_24_filled
                 : FluentIcons.heart_24_regular,
-            color: isLiked
-                ? colorScheme.primary
-                : colorScheme.onSurfaceVariant,
+            color: isLiked ? colorScheme.primary : colorScheme.onSurfaceVariant,
           ),
-          iconSize: 26,
+          iconSize: widget.iconSize,
           tooltip: context.l10n!.likedSongs,
           onPressed: () async {
             final id = audioId;
@@ -466,10 +536,14 @@ class PlayerControlButtons extends StatelessWidget {
     required this.metadata,
     required this.iconSize,
     required this.miniIconSize,
+    this.centered = false,
+    this.controlGap = 0,
   });
   final MediaItem metadata;
   final double iconSize;
   final double miniIconSize;
+  final bool centered;
+  final double controlGap;
 
   @override
   Widget build(BuildContext context) {
@@ -477,6 +551,7 @@ class PlayerControlButtons extends StatelessWidget {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final controlSize = screenWidth < 360 ? iconSize * 0.9 : iconSize;
     final sideSize = screenWidth < 360 ? miniIconSize * 0.95 : miniIconSize;
+    final gap = centered ? (controlGap > 0 ? controlGap : 12.0) : 0.0;
 
     return StreamBuilder<List<MediaItem>>(
       stream: audioHandler.queue,
@@ -484,42 +559,58 @@ class PlayerControlButtons extends StatelessWidget {
         return ValueListenableBuilder<AudioServiceRepeatMode>(
           valueListenable: repeatNotifier,
           builder: (_, repeatMode, __) {
+            final children = <Widget>[
+              _buildShuffleButton(context, colorScheme, sideSize),
+              _FlatControlButton(
+                icon: FluentIcons.previous_24_filled,
+                isEnabled:
+                    audioHandler.hasPrevious ||
+                    repeatMode != AudioServiceRepeatMode.none,
+                tooltip: context.l10n!.skipToPrevious,
+                onPressed: () => audioHandler.skipToPrevious(),
+                colorScheme: colorScheme,
+                iconSize: controlSize,
+              ),
+              PlaybackIconButton(
+                iconColor: colorScheme.onPrimary,
+                backgroundColor: colorScheme.primary,
+                iconSize: controlSize * 1.05,
+                padding: EdgeInsets.all(controlSize * 0.42),
+              ),
+              _FlatControlButton(
+                icon: FluentIcons.next_24_filled,
+                // Repeat All keeps Next enabled so the last song can loop
+                // back to the first track of the current playlist.
+                isEnabled:
+                    audioHandler.hasNext ||
+                    repeatMode != AudioServiceRepeatMode.none,
+                tooltip: context.l10n!.skipToNext,
+                onPressed: () => repeatMode == AudioServiceRepeatMode.one
+                    ? audioHandler.playAgain()
+                    : audioHandler.skipToNext(),
+                colorScheme: colorScheme,
+                iconSize: controlSize,
+              ),
+              _buildRepeatButton(
+                context,
+                colorScheme,
+                sideSize,
+                snapshot.data ?? [],
+              ),
+            ];
+
             return Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _buildShuffleButton(context, colorScheme, sideSize),
-                _FlatControlButton(
-                  icon: FluentIcons.previous_24_filled,
-                  isEnabled:
-                      audioHandler.hasPrevious ||
-                      repeatMode != AudioServiceRepeatMode.none,
-                  tooltip: context.l10n!.skipToPrevious,
-                  onPressed: () => audioHandler.skipToPrevious(),
-                  colorScheme: colorScheme,
-                  iconSize: controlSize,
-                ),
-                PlaybackIconButton(
-                  iconColor: colorScheme.onPrimary,
-                  backgroundColor: colorScheme.primary,
-                  iconSize: controlSize * 1.05,
-                  padding: EdgeInsets.all(controlSize * 0.42),
-                ),
-                _FlatControlButton(
-                  icon: FluentIcons.next_24_filled,
-                  // Repeat All keeps Next enabled so the last song can loop
-                  // back to the first track of the current playlist.
-                  isEnabled:
-                      audioHandler.hasNext ||
-                      repeatMode != AudioServiceRepeatMode.none,
-                  tooltip: context.l10n!.skipToNext,
-                  onPressed: () => repeatMode == AudioServiceRepeatMode.one
-                      ? audioHandler.playAgain()
-                      : audioHandler.skipToNext(),
-                  colorScheme: colorScheme,
-                  iconSize: controlSize,
-                ),
-                _buildRepeatButton(context, colorScheme, sideSize, snapshot.data ?? []),
-              ],
+              mainAxisAlignment: centered
+                  ? MainAxisAlignment.center
+                  : MainAxisAlignment.spaceBetween,
+              children: centered
+                  ? [
+                      for (var i = 0; i < children.length; i++) ...[
+                        if (i > 0) SizedBox(width: gap),
+                        children[i],
+                      ],
+                    ]
+                  : children,
             );
           },
         );
