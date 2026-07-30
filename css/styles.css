@@ -336,7 +336,8 @@ a.nav-download-item:focus-visible {
 }
 
 .button-version,
-[data-android-version] {
+[data-android-version],
+[data-windows-version] {
   font-variant-numeric: tabular-nums;
 }
 
@@ -352,8 +353,11 @@ a.nav-download-item:focus-visible {
 }
 
 .hero-meta [data-android-version],
+.hero-meta [data-windows-version],
 .footer-downloads [data-android-version],
-.faq-list [data-android-version] {
+.footer-downloads [data-windows-version],
+.faq-list [data-android-version],
+.faq-list [data-windows-version] {
   font-weight: 700;
 }
 
@@ -626,6 +630,10 @@ a.nav-download-item:focus-visible {
   min-height: clamp(460px, 72vw, 640px);
 }
 
+.shot-carousel[data-device="windows"] .shot-carousel-stage {
+  min-height: clamp(360px, 52vw, 480px);
+}
+
 .shot-carousel-glow {
   position: absolute;
   width: min(420px, 70vw);
@@ -660,8 +668,18 @@ a.nav-download-item:focus-visible {
   max-height: 620px;
 }
 
+.shot-carousel[data-device="windows"] .shot-track {
+  width: min(640px, 86vw);
+  height: min(428px, 57.5vw);
+  max-height: 460px;
+}
+
 .shot-carousel[data-device="phone"] .shot-slide[data-device="tablet"],
-.shot-carousel[data-device="tablet"] .shot-slide[data-device="phone"] {
+.shot-carousel[data-device="phone"] .shot-slide[data-device="windows"],
+.shot-carousel[data-device="tablet"] .shot-slide[data-device="phone"],
+.shot-carousel[data-device="tablet"] .shot-slide[data-device="windows"],
+.shot-carousel[data-device="windows"] .shot-slide[data-device="phone"],
+.shot-carousel[data-device="windows"] .shot-slide[data-device="tablet"] {
   display: none;
 }
 
@@ -688,6 +706,10 @@ a.nav-download-item:focus-visible {
   border-radius: 18px;
 }
 
+.shot-slide.windows-frame {
+  border-radius: 14px;
+}
+
 .shot-slide img {
   width: 100%;
   height: 100%;
@@ -699,6 +721,12 @@ a.nav-download-item:focus-visible {
 
 .shot-slide.tablet-frame img {
   aspect-ratio: 2048 / 2732;
+}
+
+.shot-slide.windows-frame img {
+  aspect-ratio: 1186 / 793;
+  object-fit: contain;
+  background: #020617;
 }
 
 .shot-slide.is-active {
@@ -803,6 +831,14 @@ a.nav-download-item:focus-visible {
 
 .shot-carousel[data-device="tablet"] .shot-nav-next {
   right: max(0px, calc(50% - min(420px, 72vw) / 2 - 72px));
+}
+
+.shot-carousel[data-device="windows"] .shot-nav-prev {
+  left: max(0px, calc(50% - min(640px, 86vw) / 2 - 72px));
+}
+
+.shot-carousel[data-device="windows"] .shot-nav-next {
+  right: max(0px, calc(50% - min(640px, 86vw) / 2 - 72px));
 }
 
 .shot-meta {
@@ -1219,6 +1255,24 @@ a.nav-download-item:focus-visible {
   }
 
   .shot-carousel[data-device="tablet"] .shot-nav-next {
+    right: 0.35rem;
+  }
+
+  .shot-carousel[data-device="windows"] .shot-carousel-stage {
+    min-height: 280px;
+  }
+
+  .shot-carousel[data-device="windows"] .shot-track {
+    width: min(92vw, 520px);
+    height: min(61.5vw, 348px);
+    max-height: 360px;
+  }
+
+  .shot-carousel[data-device="windows"] .shot-nav-prev {
+    left: 0.35rem;
+  }
+
+  .shot-carousel[data-device="windows"] .shot-nav-next {
     right: 0.35rem;
   }
 

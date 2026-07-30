@@ -109,6 +109,33 @@
       // Keep the static href fallback already present in the HTML.
     });
 
+  // Resolve versioned Windows installer paths from downloads/windows/version.json.
+  const applyWindowsVersion = (data) => {
+    if (!data) return;
+    const installerPath =
+      data.installerPath ||
+      (data.filename ? `downloads/windows/${data.filename}` : null);
+    if (!installerPath) return;
+
+    document.querySelectorAll("[data-windows-download]").forEach((link) => {
+      link.setAttribute("href", installerPath);
+      if (data.filename) {
+        link.setAttribute("download", data.filename);
+      }
+    });
+
+    document.querySelectorAll("[data-windows-version]").forEach((el) => {
+      el.textContent = data.version ? `v${data.version}` : "";
+    });
+  };
+
+  fetch("downloads/windows/version.json", { cache: "no-store" })
+    .then((response) => (response.ok ? response.json() : null))
+    .then(applyWindowsVersion)
+    .catch(() => {
+      // Keep the static href fallback already present in the HTML.
+    });
+
   const carousel = document.querySelector("[data-carousel]");
   if (!carousel) return;
 
@@ -276,7 +303,7 @@
   };
 
   const setDevice = (nextDevice) => {
-    if (nextDevice !== "phone" && nextDevice !== "tablet") return;
+    if (!["phone", "tablet", "windows"].includes(nextDevice)) return;
     device = nextDevice;
     carousel.dataset.device = device;
 
