@@ -10,8 +10,10 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:wiyamusic/extensions/l10n.dart';
 import 'package:wiyamusic/localization/app_localizations.dart';
 import 'package:wiyamusic/screens/splash_screen.dart';
@@ -34,9 +36,10 @@ import 'package:wiyamusic/utilities/flutter_toast.dart';
 import 'package:wiyamusic/utilities/language_utils.dart';
 import 'package:wiyamusic/utilities/playlist_utils.dart';
 import 'package:wiyamusic/utilities/sharing_intent.dart';
+import 'package:wiyamusic/widgets/windows_title_bar.dart';
 
 late WiyaMusicAudioHandler audioHandler;
-late StreamSubscription<String?> sharingIntentSubscription;
+StreamSubscription<String?>? sharingIntentSubscription;
 
 final logger = Logger();
 final appLinks = AppLinks();
@@ -117,24 +120,27 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
 
     offlineMode.addListener(_onOfflineModeChanged);
 
-    sharingIntentSubscription = ReceiveSharingIntent.getTextStream().listen(
-      (String? value) async {
-        await consumeYoutubeSharedTextIntent(
-          value,
-          audioHandler: audioHandler,
-          onError: (error, stackTrace) {
-            logger.log(
-              'Error while playing shared song:',
-              error: error,
-              stackTrace: stackTrace,
-            );
-          },
-        );
-      },
-      onError: (err) {
-        logger.log('getTextStream error:', error: err);
-      },
-    );
+    // Mobile-only: receive_sharing_intent has no Windows/desktop implementation.
+    if (Platform.isAndroid || Platform.isIOS) {
+      sharingIntentSubscription = ReceiveSharingIntent.getTextStream().listen(
+        (String? value) async {
+          await consumeYoutubeSharedTextIntent(
+            value,
+            audioHandler: audioHandler,
+            onError: (error, stackTrace) {
+              logger.log(
+                'Error while playing shared song:',
+                error: error,
+                stackTrace: stackTrace,
+              );
+            },
+          );
+        },
+        onError: (err) {
+          logger.log('getTextStream error:', error: err);
+        },
+      );
+    }
 
     try {
       LicenseRegistry.addLicense(() async* {
@@ -210,7 +216,7 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
     offlineMode.removeListener(_onOfflineModeChanged);
 
     Hive.close();
-    sharingIntentSubscription.cancel();
+    unawaited(sharingIntentSubscription?.cancel());
     super.dispose();
   }
 
@@ -235,16 +241,19 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
             systemNavigationBarContrastEnforced: true,
             // iOS: brightness of the *background* under the status bar.
             // Dark background → white time/battery icons.
-            statusBarBrightness: brightness == Brightness.dark
-                ? Brightness.dark
-                : Brightness.light,
+            statusBarBrightness:
+                brightness == Brightness.dark
+                    ? Brightness.dark
+                    : Brightness.light,
             // Android: brightness of the icons themselves.
-            statusBarIconBrightness: brightness == Brightness.dark
-                ? Brightness.light
-                : Brightness.dark,
-            systemNavigationBarIconBrightness: brightness == Brightness.dark
-                ? Brightness.light
-                : Brightness.dark,
+            statusBarIconBrightness:
+                brightness == Brightness.dark
+                    ? Brightness.light
+                    : Brightness.dark,
+            systemNavigationBarIconBrightness:
+                brightness == Brightness.dark
+                    ? Brightness.light
+                    : Brightness.dark,
           ),
           child: MaterialApp.router(
             themeMode: themeMode,
@@ -260,6 +269,11 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
             supportedLocales: appSupportedLocales,
             locale: languageSetting,
             routerConfig: NavigationManager.router,
+            builder: (context, child) {
+              return WindowsDesktopShell(
+                child: child ?? const SizedBox.shrink(),
+              );
+            },
           ),
         );
       },
@@ -267,8 +281,26 @@ class _WiyaMusicState extends State<WiyaMusic> with WidgetsBindingObserver {
   }
 }
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (Platform.isWindows) {
+    await windowManager.ensureInitialized();
+    const windowOptions = WindowOptions(
+      size: Size(1200, 800),
+      minimumSize: Size(900, 600),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      titleBarStyle: TitleBarStyle.hidden,
+      title: 'WiyaMusic',
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
+
   runApp(const AppBootstrap());
 }
 
@@ -311,25 +343,40 @@ class _AppBootstrapState extends State<AppBootstrap> {
       duration: const Duration(milliseconds: 480),
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
-      child: _ready
-          ? const WiyaMusic(key: ValueKey('wiyamusic-app'))
-          : MaterialApp(
-              key: const ValueKey('wiyamusic-splash'),
-              debugShowCheckedModeBanner: false,
-              theme: ThemeData(
-                brightness: Brightness.dark,
-                colorScheme: WiyaDesign.darkColorScheme,
-                scaffoldBackgroundColor: WiyaDesign.background,
-                useMaterial3: true,
+      child:
+          _ready
+              ? const WiyaMusic(key: ValueKey('wiyamusic-app'))
+              : MaterialApp(
+                key: const ValueKey('wiyamusic-splash'),
+                debugShowCheckedModeBanner: false,
+                theme: ThemeData(
+                  brightness: Brightness.dark,
+                  colorScheme: WiyaDesign.darkColorScheme,
+                  scaffoldBackgroundColor: WiyaDesign.background,
+                  useMaterial3: true,
+                ),
+                builder: (context, child) {
+                  return WindowsDesktopShell(
+                    child: child ?? const SizedBox.shrink(),
+                  );
+                },
+                home: const SplashScreen(),
               ),
-              home: const SplashScreen(),
-            ),
     );
   }
 }
 
 Future<void> initialisation() async {
   try {
+    // just_audio has no built-in Windows/Linux implementation; register media_kit.
+    if (Platform.isWindows || Platform.isLinux) {
+      JustAudioMediaKit.title = 'WiyaMusic';
+      JustAudioMediaKit.ensureInitialized(
+        windows: Platform.isWindows,
+        linux: Platform.isLinux,
+      );
+    }
+
     await Hive.initFlutter();
 
     await Future.wait([
@@ -348,7 +395,6 @@ Future<void> initialisation() async {
         androidShowNotificationBadge: true,
         // Leave foreground on pause so the notification can be swiped away,
         // and so stop()/X can actually cancel it on modern Android.
-        androidStopForegroundOnPause: true,
       ),
     );
 
@@ -409,9 +455,10 @@ void handleIncomingLink(Uri? uri) async {
     }
 
     // Check for duplicate by title and song ytids
-    final incomingYtids = (playlist['list'] as List<dynamic>)
-        .map((s) => s['ytid'].toString())
-        .toList();
+    final incomingYtids =
+        (playlist['list'] as List<dynamic>)
+            .map((s) => s['ytid'].toString())
+            .toList();
 
     final isDuplicate = PlaylistUtils.playlistExists(
       playlist,

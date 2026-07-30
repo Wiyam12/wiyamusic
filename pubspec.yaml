@@ -31,6 +31,10 @@ dependencies:
   http: ^1.6.0
   intl: ^0.20.2
   just_audio: ^0.10.6
+  # Windows (and Linux) backend for just_audio — not included in just_audio itself.
+  just_audio_media_kit:
+    path: ./packages/just_audio_media_kit
+  media_kit_libs_windows_audio: any
   path_provider: ^2.1.6
   receive_sharing_intent:
     path: ./packages/receive_sharing_intent
@@ -48,6 +52,7 @@ dependencies:
   animated_icon: ^1.0.0
   flutter_local_notifications: ^22.2.0
   wakelock_plus: ^1.5.2
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
@@ -66,7 +71,9 @@ flutter_launcher_icons:
   web:
     generate: false
   windows:
-    generate: false
+    generate: true
+    image_path: assets/icons/wiyamusic_icon.png
+    icon_size: 256
   macos:
     generate: false
 

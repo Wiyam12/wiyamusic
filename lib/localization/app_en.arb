@@ -89,7 +89,7 @@
   "enableUpdateChecksDescription": "Would you like WiyaMusic to check for updates automatically from GitHub releases? You can always check for updates manually from the settings",
   "enterFolderName": "Please enter a folder name",
   "equalizer": "Equalizer",
-  "equalizerAndroidOnly": "Equalizer is available on Android only.",
+  "equalizerAndroidOnly": "Equalizer is not available on this platform.",
   "equalizerBands": "Bands",
   "equalizerDisabledHint": "Band gain adjustments are bypassed.",
   "equalizerEnable": "Enable equalizer",

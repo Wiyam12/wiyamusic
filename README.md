@@ -38,8 +38,11 @@ Material UI & accent colors & dynamic colors (Android 12+) <br/>
 
 ## Screenshots
 
-| ![Screenshot 1](https://raw.githubusercontent.com/Wiyam12/wiyamusic/master/fastlane/metadata/android/en-US/images/phoneScreenshots/01.jpg) | ![Screenshot 2](https://raw.githubusercontent.com/Wiyam12/wiyamusic/master/fastlane/metadata/android/en-US/images/phoneScreenshots/02.jpg) | ![Screenshot 3](https://raw.githubusercontent.com/Wiyam12/wiyamusic/master/fastlane/metadata/android/en-US/images/phoneScreenshots/03.jpg) | ![Screenshot 4](https://raw.githubusercontent.com/Wiyam12/wiyamusic/master/fastlane/metadata/android/en-US/images/phoneScreenshots/04.jpg) |
-|----------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| ![Home](.github/assets/windows/screenshot-01.png) | ![Search](.github/assets/windows/screenshot-02.png) |
+|---------------------------------------------------|-----------------------------------------------------|
+| ![Library](.github/assets/windows/screenshot-03.png) | ![Now Playing](.github/assets/windows/screenshot-04.png) |
+| ![Lyrics](.github/assets/windows/screenshot-05.png) | ![Playlist](.github/assets/windows/screenshot-06.png) |
+| ![Settings](.github/assets/windows/screenshot-07.png) |  |
 
 
 ---

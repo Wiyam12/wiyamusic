@@ -19,6 +19,7 @@ import 'package:wiyamusic/services/data_manager.dart';
 import 'package:wiyamusic/services/io_service.dart';
 import 'package:wiyamusic/services/listening_stats_service.dart';
 import 'package:wiyamusic/services/settings_manager.dart';
+import 'package:wiyamusic/services/windows_audio_equalizer.dart';
 import 'package:wiyamusic/utilities/connectivity_utils.dart';
 import 'package:wiyamusic/utilities/map_utils.dart';
 import 'package:wiyamusic/utilities/mediaitem.dart';
@@ -433,6 +434,15 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     if (Platform.isIOS) {
       return IosAudioEqualizer.isSupported;
     }
+    if (Platform.isWindows) {
+      if (_equalizerInitialized && !force) return true;
+      await WindowsAudioEqualizer.restore(
+        enabled: equalizerEnabled.value,
+        gains: equalizerBandGains.value,
+      );
+      _equalizerInitialized = true;
+      return true;
+    }
     if (!Platform.isAndroid || _androidEqualizer == null) return false;
     if (_equalizerInitialized) return true;
 
@@ -495,14 +505,20 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
     }
   }
 
-  /// Equalizer is available on Android (ExoPlayer) and iOS (AVPlayer tap).
+  /// Equalizer is available on Android (ExoPlayer), iOS (AVPlayer tap),
+  /// and Windows (mpv / media_kit filters).
   bool get isEqualizerSupported =>
       (Platform.isAndroid && _androidEqualizer != null) ||
-      IosAudioEqualizer.isSupported;
+      IosAudioEqualizer.isSupported ||
+      WindowsAudioEqualizer.isSupported;
 
   Future<EqualizerParametersInfo?> getEqualizerParameters() async {
     if (Platform.isIOS) {
       return _getIosEqualizerParameters(restoreSettings: true);
+    }
+    if (Platform.isWindows) {
+      await _ensureEqualizerConfigured();
+      return WindowsAudioEqualizer.getParameters();
     }
 
     final equalizer = _androidEqualizer;
@@ -615,6 +631,23 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       return;
     }
 
+    if (Platform.isWindows) {
+      try {
+        await WindowsAudioEqualizer.setEnabled(enabled);
+        equalizerEnabled.value = enabled;
+        unawaited(
+          addOrUpdateData<bool>('settings', 'equalizerEnabled', enabled),
+        );
+      } catch (e, stackTrace) {
+        logger.log(
+          'Failed to set Windows equalizer enabled state',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+      return;
+    }
+
     final equalizer = _androidEqualizer;
     if (equalizer == null) return;
 
@@ -653,6 +686,35 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       } catch (e, stackTrace) {
         logger.log(
           'Failed to set iOS equalizer band gain',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+      return;
+    }
+
+    if (Platform.isWindows) {
+      try {
+        await WindowsAudioEqualizer.setBandGain(index, gain);
+        final gains = List<double>.from(equalizerBandGains.value);
+        while (gains.length <= index) {
+          gains.add(0);
+        }
+        gains[index] = gain.clamp(
+          WindowsAudioEqualizer.minDecibels,
+          WindowsAudioEqualizer.maxDecibels,
+        );
+        equalizerBandGains.value = gains;
+        unawaited(
+          addOrUpdateData<List<double>>(
+            'settings',
+            'equalizerBandGains',
+            gains,
+          ),
+        );
+      } catch (e, stackTrace) {
+        logger.log(
+          'Failed to set Windows equalizer band gain',
           error: e,
           stackTrace: stackTrace,
         );
@@ -707,6 +769,31 @@ class WiyaMusicAudioHandler extends BaseAudioHandler {
       } catch (e, stackTrace) {
         logger.log(
           'Failed to reset iOS equalizer bands',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+      return;
+    }
+
+    if (Platform.isWindows) {
+      try {
+        await WindowsAudioEqualizer.resetBands();
+        final gains = List<double>.filled(
+          WindowsAudioEqualizer.bandCentersHz.length,
+          0,
+        );
+        equalizerBandGains.value = gains;
+        unawaited(
+          addOrUpdateData<List<double>>(
+            'settings',
+            'equalizerBandGains',
+            gains,
+          ),
+        );
+      } catch (e, stackTrace) {
+        logger.log(
+          'Failed to reset Windows equalizer bands',
           error: e,
           stackTrace: stackTrace,
         );
