@@ -1,7 +1,7 @@
 # WiyaMusic 🎵
 
 <p align="center">
-  <img width="300" alt="WiyaMusic Banner" src=".github/assets/Musify-banner.png">
+  <img width="300" alt="WiyaMusic Banner" src=".github/assets/WiyaMusic-banner.png">
 </p>
 <p align="center">
   <b>Unlock the Rhythm: Your Ultimate Music Companion!</b>
@@ -88,42 +88,49 @@ WiyaMusic welcomes contributions!
 <summary><b>Q: I can't find my music language in the app</b></summary>
 
 You can use the search feature to find music in your preferred language. The app also supports exploring music by genre and artist.
+
 </details>
 
 <details>
 <summary><b>Q: There are problems with song titles or lyrics</b></summary>
 
 Song titles and lyrics come from YouTube Music / Genius. WiyaMusic cannot correct this data directly. If you find issues, please report them to YouTube Music or Genius.
+
 </details>
 
 <details>
 <summary><b>Q: There are no results for my search</b></summary>
 
 WiyaMusic uses YouTube Music for search. If YouTube Music returns no results, WiyaMusic cannot show any. You can try searching for the same query on YouTube Music to verify.
+
 </details>
 
 <details>
 <summary><b>Q: Why does WiyaMusic require a battery optimization exemption?</b></summary>
 
 Android's battery optimization can interrupt background media playback. Disabling it for WiyaMusic helps ensure uninterrupted listening.
+
 </details>
 
 <details>
 <summary><b>Q: Can I customize the app's theme?</b></summary>
 
 Yes. WiyaMusic supports dynamic theming and accent colors.
+
 </details>
 
 <details>
 <summary><b>Q: How do I import or export playlists?</b></summary>
 
 Go to the Library section. You can import/export playlists as JSON or CSV, and also import playlists from YouTube.
+
 </details>
 
 <details>
 <summary><b>Q: How do I report a bug or suggest a feature?</b></summary>
 
 Open an issue on [GitHub](https://github.com/Wiyam12/wiyamusic/issues).
+
 </details>
 
 ## Credits
